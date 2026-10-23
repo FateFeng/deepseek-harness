@@ -82,6 +82,16 @@ export interface SessionRowOwnerProps {
   displayTitle: string
 }
 
+/** Workspace identity shown by the browser-owned edit dialog. */
+export interface WorkspaceEditOwnerProps {
+  /** Workspace the edit dialog is open for. */
+  readonly workspaceId: WorkspaceId
+  /** Canonical primary directory; Session cwd remains unchanged by editor contributions. */
+  readonly path: string
+  /** Current display title. */
+  readonly title: string
+}
+
 /** The row menu's open state as its owner holds it: the `useState` pair. */
 export type MenuOpenState = readonly [open: boolean, setOpen: (open: boolean) => void]
 
@@ -125,6 +135,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.hero.workspace.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
     /** Directory-flow hole under the sidebar browsing region (declared by the WorkspaceBrowser entry). */
     'sidebar.workspaces.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
+    /** Workspace-specific content inside the browser-owned Workspace edit dialog. */
+    'sidebar.workspaces.workspace.edit': { kind: 'single'; scope: 'root'; owner: WorkspaceEditOwnerProps }
     /**
      * Leading decoration of one Session row, in the 16px cell before the title
      * that the row's own state dot otherwise occupies. A higher-priority state
@@ -257,6 +269,8 @@ export type WorkspaceBrowserInjected = {
    * Create a fresh Session, or preserve a reusable blank with explicit draft options.
    * Without an explicit Workspace, inherit the current Session Workspace,
    * then the recent Workspace, or clear into the New Session view.
+   * With `fresh`, skip the Workspace's reusable blank Session and ask the Host to
+   * create a new identity, which neither observes nor resumes prior Session state.
    */
   startSession: (workspaceId?: WorkspaceId, options?: StartSessionOptions) => void
   /** Open a real Session. */
@@ -485,6 +499,7 @@ export type WorkspaceBrowserProps =
   PropsRuntime<'sidebar.workspaces'>
   & PropsRenderSlots<
     | 'sidebar.workspaces.directoryFlow'
+    | 'sidebar.workspaces.workspace.edit'
     | 'sidebar.workspaces.session.menu.item'
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.trailing'

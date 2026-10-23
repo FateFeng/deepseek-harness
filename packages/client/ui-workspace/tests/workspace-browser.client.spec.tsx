@@ -15,7 +15,8 @@ import type {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
+import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps, WorkspaceEditOwnerProps } from '../src/client/contract/slots.ts'
 import { createWorkspaceShortcutControls } from '../src/client/shortcuts.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
@@ -1318,6 +1319,18 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).toHaveBeenCalledWith(wid('alpha'))
   })
 
+  it('expands the target group before starting a forced-new session from its row', () => {
+    const startSession = vi.fn()
+    const b = mount({
+      useSessions: hook(sessionState([summary('alpha-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])])),
+      startSession,
+    })
+    fireEvent.click(screen.getByRole('button', { name: '在“alpha”中强制新建会话' }))
+    expect(b.store.getSnapshot().groupExpansion).toEqual({ alpha: true })
+    expect(startSession).toHaveBeenCalledWith(wid('alpha'), { fresh: true })
+  })
+
   it('auto-expands the Ungrouped bucket for a loose current session; its header has no menu and its ＋ is inert', () => {
     const startSession = vi.fn()
     mount({
@@ -1328,6 +1341,7 @@ describe('WorkspaceBrowser', () => {
     // The loose session's group is UNGROUPED_KEY: expanded by the effect.
     expect(screen.getByText('loose')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '工作区“未分组”的操作' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '在“未分组”中强制新建会话' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '在“未分组”中新建会话' }))
     expect(startSession).not.toHaveBeenCalled()
   })
@@ -2404,17 +2418,40 @@ describe('WorkspaceBrowser', () => {
     })
     expect(screen.getByRole('button', { name: '工作区“默认工作区”的操作' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '工作区“default-workspace backup”的操作' })).toBeTruthy()
-    // The dialog edits the text on screen, and the stored title — not that
-    // text — decides whether confirming saves. So confirming the untouched
-    // prefill pins the localized name and the row stops following the language.
+    // The legacy Rename command still presents its own action and title. The
+    // visible localized default is saved as an explicit title when confirmed.
     fireEvent.click(screen.getByRole('button', { name: '工作区“默认工作区”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+    expect(screen.getByRole('dialog', { name: '重命名工作区' })).toBeTruthy()
     expect(screen.getByLabelText<HTMLInputElement>('工作区名称').value).toBe('默认工作区')
     expect(screen.queryByRole('alert')).toBeNull()
     const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '重命名' })
     expect(confirm.disabled).toBe(false)
     fireEvent.click(confirm)
     expect(renameWorkspace).toHaveBeenCalledWith(wid('alpha'), '默认工作区')
+  })
+
+  it('renders the Workspace editor child inside the Edit dialog with the canonical root', () => {
+    const renameWorkspace = vi.fn(async () => {})
+    const renderSlot: WorkspaceBrowserProps['renderSlot'] = (name: string, owner: object) => {
+      if (name !== 'sidebar.workspaces.workspace.edit') return null
+      const edit = owner as WorkspaceEditOwnerProps
+      return <div data-testid="workspace-editor" data-path={edit.path} data-workspace-id={edit.workspaceId} />
+    }
+    mount({
+      useWorkspaces: hook(workspaceState([workspace('alpha', [], 'Alpha')])),
+      renameWorkspace,
+      renderSlot,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
+    expect(screen.getByRole('dialog', { name: '编辑工作区' })).toBeTruthy()
+    expect(screen.getByTestId('workspace-editor').getAttribute('data-path')).toBe('/projects/alpha')
+    expect(screen.getByTestId('workspace-editor').getAttribute('data-workspace-id')).toBe('alpha')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect(renameWorkspace).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('renames a workspace through the row menu dialog', async () => {
@@ -2428,7 +2465,7 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     const input = screen.getByLabelText<HTMLInputElement>('工作区名称')
     expect(input.value).toBe('Alpha')
-    // Unchanged and blank names stay blocked.
+    // The original Rename action remains disabled until the title changes.
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '重命名' }).disabled).toBe(true)
     fireEvent.change(input, { target: { value: '   ' } })
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '重命名' }).disabled).toBe(true)
@@ -2456,8 +2493,9 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     const input = screen.getByLabelText<HTMLInputElement>('工作区名称')
-    // Enter with a blocked draft (unchanged) does nothing.
-    fireEvent.keyDown(input, { key: 'Enter' })
+    // A blank name blocks Save.
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '重命名' }).disabled).toBe(true)
     expect(renameWorkspace).not.toHaveBeenCalled()
     fireEvent.change(input, { target: { value: 'Renamed' } })
     fireEvent.keyDown(input, { key: 'a' })

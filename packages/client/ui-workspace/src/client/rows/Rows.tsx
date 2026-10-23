@@ -3,7 +3,7 @@
  * all data and callbacks arrive via props. Hover swaps (folder->chevron,
  * time->ellipsis, action buttons) are CSS-only, and a session row's clipped
  * title marquees programmatically while the row is hovered. Workspace row
- * menus are visual-only except Rename/Delete. A Session row's "..." menu and
+ * menus are visual-only except Edit/Delete. A Session row's "..." menu and
  * its hover buttons are the `sidebar.workspaces.session.menu.item` and
  * `sidebar.workspaces.session.row.action` lists, rendered through the
  * browser's `renderSlot` with the menu's open state as the occurrence's hook
@@ -17,7 +17,7 @@ import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   HoverCard, IconArchiveOutlineRegular, IconEditOutlineRegular,
   IconEllipsisOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
-  IconNewChatOutlineRegular, IconPinFillRegular, IconTrashOutlineRegular,
+  IconNewChatOutlineRegular, IconPinFillRegular, IconSparkleRegular, IconTrashOutlineRegular,
   IconTriangleRightFillRegular, IconUnarchiveOutlineRegular, Menu, relativeTime, StateDot, Tooltip, useRowDragPreview,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
@@ -218,8 +218,10 @@ type ProjectRowItemProps = {
   containsCurrentDescendant?: boolean
   onToggle: () => void
   onCreate: () => void
+  /** Start a Session with a new identity that reuses nothing; absent for the ungrouped bucket. */
+  onCreateFresh?: (() => void) | undefined
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  actions?: { edit: () => void; rename: () => void; delete: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -230,6 +232,8 @@ type ProjectRowItemProps = {
 /** Which of one header row's actions the caller's access snapshot allows. */
 interface ProjectRowAccess {
   readonly create: boolean
+  /** The Workspace-edit slot only exists for a real Workspace row. */
+  readonly edit: boolean
   readonly rename: boolean
   readonly delete: boolean
   readonly reorder: boolean
@@ -247,6 +251,8 @@ interface ProjectRowAccess {
  * @param props.containsCurrentDescendant - highlight an ancestor even when its subtree is collapsed.
  * @param props.onToggle - expand/collapse the group.
  * @param props.onCreate - start a frontend Session inside this Workspace.
+ * @param props.onCreateFresh - start a Session with a new identity that reuses nothing;
+ * absent for the ungrouped bucket, which has no Workspace to create one in.
  * @param props.drag - optional workspace-row drag wiring.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
@@ -262,7 +268,7 @@ export function ProjectRowItem(props: ProjectRowItemProps) {
 /** The ungrouped bucket's header: no Workspace resource, so starting a Session there asks the global resource. */
 function UngroupedProjectRow(props: ProjectRowItemProps) {
   const create = props.useRemoteAccess('session/create')
-  return <ProjectRow {...props} access={{ create, rename: false, delete: false, reorder: false }} />
+  return <ProjectRow {...props} access={{ create, edit: false, rename: false, delete: false, reorder: false }} />
 }
 
 /** A real Workspace's header: every action asks that Workspace's resource. */
@@ -270,6 +276,7 @@ function WorkspaceProjectRow({ workspaceId, ...props }: ProjectRowItemProps & { 
   const { useWorkspaceAccess } = props
   const access: ProjectRowAccess = {
     create: useWorkspaceAccess(workspaceId, 'session/create'),
+    edit: true,
     rename: useWorkspaceAccess(workspaceId, 'workspace/rename'),
     delete: useWorkspaceAccess(workspaceId, 'workspace/delete'),
     reorder: useWorkspaceAccess(workspaceId, 'workspace/insertBefore'),
@@ -278,7 +285,7 @@ function WorkspaceProjectRow({ workspaceId, ...props }: ProjectRowItemProps & { 
 }
 
 function ProjectRow({
-  group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag: offeredDrag, home, newShortcut, t, access,
+  group, containsCurrentDescendant = false, onToggle, onCreate, onCreateFresh, actions, drag: offeredDrag, home, newShortcut, t, access,
 }: ProjectRowItemProps & { access: ProjectRowAccess }) {
   const drag = access.reorder ? offeredDrag : undefined
   const row = group
@@ -288,6 +295,7 @@ function ProjectRow({
   const [menuOpen, setMenuOpen] = useState(false)
   const dragPreview = useRowDragPreview(css.dragPreview as string, DRAG_PREVIEW_PROPERTIES)
   const workspaceMenuItems = [
+    ...access.edit && actions !== undefined ? [{ id: 'edit', label: t('edit.workspace'), icon: <IconEditOutlineRegular /> }] : [],
     ...access.rename ? [{ id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> }] : [],
     ...access.delete ? [{ id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true }] : [],
   ]
@@ -328,9 +336,10 @@ function ProjectRow({
               setMenuOpen(false)
               // Unknown ids leave before the dispatch: a future menu row must
               // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
-              if (id === 'rename') actions.rename()
+              /* v8 ignore next -- Menu can emit only the edit, rename and delete rows supplied above. */
+              if (id !== 'edit' && id !== 'rename' && id !== 'delete') return
+              if (id === 'edit') actions.edit()
+              else if (id === 'rename') actions.rename()
               else actions.delete()
             }}
             portal
@@ -357,6 +366,18 @@ function ProjectRow({
               onClick={(e) => { e.stopPropagation(); onCreate() }}
             >
               <IconNewChatOutlineRegular size={14} />
+            </button>
+          </Tooltip>
+        )}
+        {onCreateFresh !== undefined && (
+          <Tooltip label={t('actions.freshSession')} side="bottom" align="end" delayMs={500} portal>
+            <button
+              type="button"
+              className={css.iconButton}
+              aria-label={t('actions.freshSession.aria', { name: label })}
+              onClick={(e) => { e.stopPropagation(); onCreateFresh() }}
+            >
+              <IconSparkleRegular size={14} />
             </button>
           </Tooltip>
         )}

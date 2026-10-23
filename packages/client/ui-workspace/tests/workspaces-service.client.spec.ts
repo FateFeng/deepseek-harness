@@ -712,6 +712,23 @@ describe('UiWorkspaceService', () => {
     ])
   })
 
+  it('creates a new identity for a fresh Session instead of adopting the reusable blank', async () => {
+    const b = bench({
+      sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })]),
+      workspaces: workspaceState([workspace('a', [sid('blank')])]),
+    })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledOnce() })
+    b.sessions.create.mockClear()
+    b.sessions.retain.mockClear()
+    await b.uiWorkspace.openWorkspace(wid('a'), undefined, { fresh: true })
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') })
+    expect(b.sessions.retain).toHaveBeenLastCalledWith(sid('created-a'), { source: 'mainView' })
+
+    b.sessions.create.mockClear()
+    b.uiWorkspace.startSession(wid('a'), { fresh: true })
+    await vi.waitFor(() => { expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') }) })
+  })
+
   it('reports a refused explicit Session creation through the Workspace notice', async () => {
     const b = bench({ workspaces: workspaceState([workspace('a')]), sessions: sessionState() })
     // Startup restoration creates its own Session first and stays quiet on failure (pinned above).

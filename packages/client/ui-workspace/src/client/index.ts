@@ -62,7 +62,7 @@ export type { StartSessionOptions, UiWorkspace } from './navigation.ts'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
   MenuOpenState, RowToast, SessionRenameTarget, SessionRowOwnerProps, UseMenuOpenState, WorkspaceBrowserInjected,
-  SessionRowScheduleOwnerProps,
+  SessionRowScheduleOwnerProps, WorkspaceEditOwnerProps,
   WorkspaceBrowserProps,
   WorkspacePickerInjected, WorkspacePickerProps,
 } from './contract/slots.ts'
@@ -294,6 +294,7 @@ export function apply(ctx: Context): void {
       name: 'sidebar.workspaces',
       children: {
         'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' },
+        'sidebar.workspaces.workspace.edit': { kind: 'single', scope: 'root' },
         // Every row entry reads the menu's open state through a hook bound
         // from the row's render occurrence (the owner passes the state pair
         // as hookContext).

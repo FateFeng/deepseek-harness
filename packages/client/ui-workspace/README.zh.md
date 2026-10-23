@@ -47,6 +47,8 @@ kind: "package-reference"
 
 在不支持悬停的设备上，Workspace 行始终显示菜单和新建会话按钮，已归档的搜索结果始终显示取消归档按钮。
 
+Workspace 编辑对话框提供 root-scoped `sidebar.workspaces.workspace.edit` slot。其 owner 接收 `WorkspaceEditOwnerProps { workspaceId: WorkspaceId; path: string; title: string }`，其中 `path` 是规范的主 Workspace 路径。Client 插件可在此放置附加源目录控件，而不重命名 Workspace 或修改主路径；选择其他文件浏览器根目录也不会改变 Session cwd。
+
 ### 搜索
 
 折叠搜索是视图和添加操作旁的一枚区头按钮：激活后输入框会扩展并占据区头。在展开的侧栏中打开或关闭搜索时，区头间距与输入框展开采用同步的 180 ms 过渡，减少动态效果模式下禁用。从折叠栏展开侧栏时，区头直接采用最终几何位置，同时保留内容淡入。折叠栏搜索会在展开侧栏前准备好输入框的打开状态，因此首个宽栏渲染就包含已展开的输入框。搜索标题即使被截断，也会在取消归档的点击区域前留出间距。非空白查询会以单一扁平结果列表替代任一浏览模式——不区分大小写的标题、Workspace 和 Session id 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，不另给警告。列表最多显示 20 条结果。选择未归档结果会清空并收起搜索、打开 Session，并在当前浏览模式中将其行滚动到可见区域；分组浏览还会按需展开所属 Workspace 和完整 Session 列表。已归档结果提供取消归档操作；尝试打开时会说明限制，不清空查询，也不导航。
@@ -73,13 +75,13 @@ Session 行渲染运行时的实时 `pendingInteraction` 分类：审批显示**
 
 -----
 
-`ctx.uiWorkspace.openSession(target)` 会同步替换其拥有的 `mainView` reference，并让主区域返回 Conversation，而不等待 `reference.ready`，因此历史加载会显示在已经选中的 Session 视图内。目标可以是已知 Session id，也可以是持久的直接父子 subagent 地址；显式地址不要求预先加载 parent catalog。`openWorkspace(id, beforeOpen?, options?)` 仅在请求未被后续导航替代时打开工作区空白 Session；新会话与重新打开工作区打开同一个空白会话，因此会回到该空白会话中未发送的草稿。`forkSession(id, onCreated?, options?)` 创建子会话，不导航，也不替代尚未完成的导航；`allowMigration` 携带调用方的迁移许可。可选的同步准备回调在目标被 retain 后执行，并且仅对仍有效的 Workspace 请求执行，因此过期请求不会搬移 composer 草稿。后续导航或 owner 释放会阻止晚到的 UI 提交，但不取消底层 Session 创建。
+`ctx.uiWorkspace.openSession(target)` 会同步替换其拥有的 `mainView` reference，并让主区域返回 Conversation，而不等待 `reference.ready`，因此历史加载会显示在已经选中的 Session 视图内。目标可以是已知 Session id，也可以是持久的直接父子 subagent 地址；显式地址不要求预先加载 parent catalog。`openWorkspace(id, beforeOpen?, options?)` 仅在请求未被后续导航替代时打开工作区空白 Session；新会话与重新打开工作区打开同一个空白会话，因此会回到该空白会话中未发送的草稿；其 `fresh` 选项改为新建身份，不获取空白会话。`forkSession(id, onCreated?, options?)` 创建子会话，不导航，也不替代尚未完成的导航；`allowMigration` 携带调用方的迁移许可。可选的同步准备回调在目标被 retain 后执行，并且仅对仍有效的 Workspace 请求执行，因此过期请求不会搬移 composer 草稿。后续导航或 owner 释放会阻止晚到的 UI 提交，但不取消底层 Session 创建。
 
 Session 行与 Workspace 行的可用操作来自浏览器根的访问 Hook：全局 `useRemoteAccess('session/create')` 门控所有新建会话入口，`useWorkspaceAccess` 门控 Workspace 的新建、重命名、删除与排序动作，`useSessionAccess` 门控 Session 行的重命名、分叉、拖拽、置顶、归档与取消归档动作，以及搜索结果的恢复控件。被拒绝的动作不渲染，但每个发往 Host 的请求仍以其授权为准。启动恢复会 retain 主 reference，不改变已选面板，也不取消后续导航。归档主 Session 会释放其 reference 并清除主选择。选择失败时保留当前全局面板。Session 行读取 `usePanelInfo`，在全局面板活跃时不显示 Session 选中样式；仅把焦点移到搜索框或目录选择器不会离开该面板。
 
 导航和启动恢复通过所选 Session 的 `follow` 获取投影，不会另行刷新该 Session 或其父会话的投影；例外是恢复已保存的空白会话时先重新加载该 Session 的投影，因为列表中的值是缓存提示，Host 非正常退出后可能落后于其日志。
 
-新会话、重新打开工作区和显式准备草稿向 Host 请求 Session 时，指明列表中第一个符合条件的空白会话。指明 preset 的请求会跳过列出其他 preset 的空白会话，因此创造模式入口等 preset 流程不会接管其他 preset 的草稿；未指明 preset 的请求可以指明任何符合条件的空白会话，由 Host 切换到其默认 preset。被复用的空白会话可能沿用创建时的 preset 装配。启动恢复指明已保存的空白会话。Host 以请求的 preset 复用该空白会话，请求未指明 preset 时使用其默认 preset；若该空白会话已开始、已离开该工作区或写锁被其他写者占用，Host 改为新建 Session；导航打开 Host 返回的 Session，不再尝试其他空白会话。带草稿选项的 `startSession`、`openWorkspace` 和 `connectWorkspace` 接受 `{ agentPreset }`，供开始前已确定 preset 的流程使用，例如创造模式入口；一次连接仅在与该工作区最近一次进行中的连接请求相同 preset 时与之合并，因此最新的请求总会到达 Host。启动恢复传入已保存空白会话日志记录的 preset，使草稿保留该 preset；当 Host 报告该 preset 不存在（`agent-preset/not-found`）或无法激活（`agent-preset/invalid`）时，启动恢复改为不带 preset 再请求一次，草稿在 Host 默认 preset 下继续。其他错误会中止请求：显式新建会话或在 hero 中选择工作区时，失败以短暂提示展示，引用 Host 的错误码和消息（例如 preset 挂载失败），非 Host 拒绝的失败则显示其自身消息；已被后续导航或 owner 销毁取代的请求不弹提示，启动恢复仍只报告到控制台。已释放的空白会话被复用时保留 slash 命令状态。后续导航会取消尚未完成的启动选择，并阻止失败的恢复在后续列表更新时重试。
+新会话、重新打开工作区和显式准备草稿向 Host 请求 Session 时，指明列表中第一个符合条件的空白会话。工作区行的强制新建按钮跳过该指明，直接向 Host 请求一个新身份，既不读取也不恢复已有会话，也不会加入指向同一工作区、尚未完成的连接请求。指明 preset 的请求会跳过列出其他 preset 的空白会话，因此创造模式入口等 preset 流程不会接管其他 preset 的草稿；未指明 preset 的请求可以指明任何符合条件的空白会话，由 Host 切换到其默认 preset。被复用的空白会话可能沿用创建时的 preset 装配。启动恢复指明已保存的空白会话。Host 以请求的 preset 复用该空白会话，请求未指明 preset 时使用其默认 preset；若该空白会话已开始、已离开该工作区或写锁被其他写者占用，Host 改为新建 Session；导航打开 Host 返回的 Session，不再尝试其他空白会话。带草稿选项的 `startSession`、`openWorkspace` 和 `connectWorkspace` 接受 `{ agentPreset }`，供开始前已确定 preset 的流程使用，例如创造模式入口；一次连接仅在与该工作区最近一次进行中的连接请求相同 preset 时与之合并，因此最新的请求总会到达 Host。启动恢复传入已保存空白会话日志记录的 preset，使草稿保留该 preset；当 Host 报告该 preset 不存在（`agent-preset/not-found`）或无法激活（`agent-preset/invalid`）时，启动恢复改为不带 preset 再请求一次，草稿在 Host 默认 preset 下继续。其他错误会中止请求：显式新建会话或在 hero 中选择工作区时，失败以短暂提示展示，引用 Host 的错误码和消息（例如 preset 挂载失败），非 Host 拒绝的失败则显示其自身消息；已被后续导航或 owner 销毁取代的请求不弹提示，启动恢复仍只报告到控制台。已释放的空白会话被复用时保留 slash 命令状态。后续导航会取消尚未完成的启动选择，并阻止失败的恢复在后续列表更新时重试。
 
 Workspace 和 Session 的启动基线均就绪后，空安装环境调用 `workspaces.initializeDefault`，创建或复用其空白 Session。选中该 Session 后输入框才可编辑，不会自动提交消息。后续导航或所属上下文销毁会阻止启动流程选中其结果。不符合首次使用条件时仍可选择文件夹，不显示错误。默认工作区创建失败时显示短暂提示，引导用户通过“选择工作区”选择文件夹，直到下次启动才重试。Session 创建失败沿用普通的恢复错误处理。登记成功的工作区在 Session 创建或后续提交失败时仍然保留。
 

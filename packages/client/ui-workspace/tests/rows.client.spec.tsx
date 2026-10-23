@@ -336,6 +336,17 @@ describe('workspace browser rows', () => {
     expect(screen.getByText(label)).toBeTruthy()
   })
 
+  it('renders the fresh-create action beside the blank-reusing one', () => {
+    const onCreateFresh = vi.fn()
+    const group: GroupNode = {
+      key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+      sessionCount: 1, expanded: true, containsCurrent: false, sessions: [],
+    }
+    render(<ProjectRowItem group={group} onToggle={vi.fn()} onCreate={vi.fn()} onCreateFresh={onCreateFresh} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: '在“Project”中强制新建会话' }))
+    expect(onCreateFresh).toHaveBeenCalledOnce()
+  })
+
   it('renders an active Workspace and keeps its create action separate from toggling', () => {
     const onToggle = vi.fn()
     const onCreate = vi.fn()
@@ -624,7 +635,8 @@ describe('workspace browser rows', () => {
     expect(screen.getByRole('treeitem').querySelector('[data-state="done"]')).not.toBeNull()
   })
 
-  it('workspace row menu opens on the ellipsis, renames, and shows the danger delete row', () => {
+  it('workspace row menu preserves Edit, Rename, and danger Delete actions', () => {
+    const onEdit = vi.fn()
     const onRename = vi.fn()
     const onDelete = vi.fn()
     const onToggle = vi.fn()
@@ -634,18 +646,24 @@ describe('workspace browser rows', () => {
     }
     render(<ProjectRowItem
       group={group} onToggle={onToggle} onCreate={vi.fn()}
-      actions={{ rename: onRename, delete: onDelete }} t={t}
+      actions={{ edit: onEdit, rename: onRename, delete: onDelete }} t={t}
     />)
     fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
-    // Opening the menu neither toggles the group nor renames yet.
+    // Opening the menu neither toggles the group nor edits yet.
     expect(onToggle).not.toHaveBeenCalled()
     expect(screen.getByRole('menuitem', { name: '删除工作区' }).className).toMatch(/danger/)
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
+    expect(onEdit).toHaveBeenCalledOnce()
+    expect(onRename).not.toHaveBeenCalled()
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     expect(onRename).toHaveBeenCalledOnce()
     expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
     expect(screen.queryByRole('menu')).toBeNull()
+    expect(onEdit).toHaveBeenCalledOnce()
     expect(onRename).toHaveBeenCalledOnce()
     expect(onDelete).toHaveBeenCalledOnce()
     // Escape closes without selecting (Menu onClose path).

@@ -837,6 +837,8 @@ describe('ui-workspace apply', () => {
     expect(startSession).toHaveBeenLastCalledWith(undefined, undefined)
     browser.startSession(undefined, { clearPreviousDraft: false })
     expect(startSession).toHaveBeenLastCalledWith(undefined, { clearPreviousDraft: false })
+    browser.startSession('ws' as never, { fresh: true })
+    expect(startSession).toHaveBeenLastCalledWith('ws', { fresh: true })
     browser.open('session' as never)
     expect(b.retain).toHaveBeenCalledWith('session', { source: 'mainView' })
     const signal = new AbortController().signal
