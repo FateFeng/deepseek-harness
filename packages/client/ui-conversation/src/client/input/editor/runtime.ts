@@ -5,9 +5,14 @@ import {
   $addUpdateTag, $createParagraphNode, $createTextNode, $getAdjacentNode, $isTextNode,
   $getRoot, $getSelection, $getNodeByKey, $isRangeSelection,
   BLUR_COMMAND, CLEAR_HISTORY_COMMAND, COMMAND_PRIORITY_BEFORE_CRITICAL, COMMAND_PRIORITY_CRITICAL, createEditor,
+  DRAGOVER_COMMAND, DROP_COMMAND,
   HISTORY_MERGE_TAG, PASTE_TAG,
   RootNode, SELECTION_CHANGE_COMMAND, SKIP_DOM_SELECTION_TAG, KEY_BACKSPACE_COMMAND, KEY_DELETE_COMMAND, HISTORY_PUSH_TAG,
 } from 'lexical'
+import {
+  FILE_REFERENCE_DRAG_TYPE, fileReferenceDragText, parseFileReferenceDrag,
+} from '@deepseek-ai/dsh-file-reference/grammar'
+import type { FileReferenceDragPayload } from '@deepseek-ai/dsh-file-reference/grammar'
 import { registerPlainText } from '@lexical/plain-text'
 import { createEmptyHistoryState, registerHistory } from '@lexical/history'
 import { mergeRegister } from '@lexical/utils'
@@ -34,6 +39,12 @@ interface DraftEditorRuntimeDeps {
   readonly openReference: (source: string | undefined, reference: Pick<ReferenceInsert, 'ref' | 'appearance'>) => boolean
   readonly lexicon: () => Lexicon
   readonly resolveLexicon: () => ObservableSnapshot<Lexicon> | undefined
+  /** Host list-based proof that a dropped path is a child of an authorized workspace directory. */
+  readonly authorizeDraggedReference?: (
+    path: string,
+    kind: FileReferenceDragPayload['kind'],
+    signal: AbortSignal,
+  ) => Promise<boolean>
 }
 
 /**
@@ -64,6 +75,21 @@ const HISTORY_MERGE_DELAY_MS = 1000
 
 /** Editor update that removes submitted content while retaining any newer draft suffix. */
 export const DRAFT_SUBMITTED_TAG = 'dsh-draft-submitted'
+/** Convert the untrusted transfer into the same structured chip used by file-reference picks. */
+function referenceForDraggedPath(payload: FileReferenceDragPayload): ReferenceInsert | undefined {
+  const clipboardText = fileReferenceDragText(payload)
+  if (clipboardText === undefined) return undefined
+  const path = payload.path.replace(/[\\/]+$/u, '')
+  const name = path.split(/[\\/]/u).at(-1) || payload.path
+  const directory = payload.kind === 'directory'
+  return {
+    source: 'reference',
+    ref: clipboardText,
+    label: directory ? `${name}/` : name,
+    appearance: directory ? 'folder' : 'file',
+    clipboardText,
+  }
+}
 
 /** One model-owned editor; registration and disposal remain with its model. */
 export class DraftEditorRuntime {
@@ -72,12 +98,18 @@ export class DraftEditorRuntime {
   private projected: EditorProjection = {
     detectText: '', clipboardText: '', occurrences: [], quotes: [], selection: null, caret: null, command: undefined,
   }
+  private projected: EditorProjection = { detectText: '', clipboardText: '', occurrences: [], selection: null, caret: null }
+  /** Monotonic content revision for invalidating asynchronous Host checks after any intervening edit. */
+  private draftRevision = 0
   /** Stable occurrence ids per chip NodeKey (undo restores keys, so ids survive it too). */
   private readonly occurrenceIds = new Map<NodeKey, number>()
   private occurrenceSeq = 0
   /** Live lexicon subscription disposer; undefined until the controller resolves. */
   private lexiconOff: (() => void) | undefined
   private lexiconSource: ObservableSnapshot<Lexicon> | undefined
+  /** Pending Host path checks are retired with this Session's editor. */
+  private readonly dragDropAbort = new AbortController()
+  private disposed = false
 
   /** @param deps - model callbacks used by editor listeners and transforms. */
   constructor(private readonly deps: DraftEditorRuntimeDeps) {
@@ -107,6 +139,48 @@ export class DraftEditorRuntime {
       this.editor.registerCommand(REMOVE_QUOTE_COMMAND, key => this.removeQuote(key), COMMAND_PRIORITY_CRITICAL),
       this.editor.registerCommand(KEY_BACKSPACE_COMMAND, event => this.deleteAdjacentQuote(event, true), COMMAND_PRIORITY_BEFORE_CRITICAL),
       this.editor.registerCommand(KEY_DELETE_COMMAND, event => this.deleteAdjacentQuote(event, false), COMMAND_PRIORITY_BEFORE_CRITICAL),
+      this.editor.registerCommand(DRAGOVER_COMMAND, (event) => {
+        const transfer = event.dataTransfer
+        if (transfer === null || !Array.from(transfer.types).includes(FILE_REFERENCE_DRAG_TYPE)) return false
+        event.preventDefault()
+        transfer.dropEffect = 'copy'
+        return true
+      }, COMMAND_PRIORITY_CRITICAL),
+      this.editor.registerCommand(DROP_COMMAND, (event) => {
+        const transfer = event.dataTransfer
+        if (transfer === null || !Array.from(transfer.types).includes(FILE_REFERENCE_DRAG_TYPE)) return false
+        // Once our custom MIME is present, never fall through to plain text:
+        // a malformed/denied payload must not become an unverified @ mention.
+        event.preventDefault()
+        const payload = parseFileReferenceDrag(transfer.getData(FILE_REFERENCE_DRAG_TYPE))
+        if (payload === undefined) return true
+        const reference = referenceForDraggedPath(payload)
+        if (reference === undefined) return true
+        // A DataTransfer is attacker-controlled. Consume the drop now, then
+        // require a fresh Host directory listing to prove the exact child is
+        // visible under this Session's currently authorized workspace root.
+        const draftAtDrop = this.projected.clipboardText
+        const revisionAtDrop = this.draftRevision
+        const signal = this.dragDropAbort.signal
+        let authorization: Promise<boolean>
+        try {
+          authorization = this.deps.authorizeDraggedReference?.(payload.path, payload.kind, signal)
+            ?? Promise.resolve(false)
+        } catch {
+          return true
+        }
+        void authorization.then((authorized) => {
+          if (!authorized || this.disposed || signal.aborted
+            || this.draftRevision !== revisionAtDrop || this.projected.clipboardText !== draftAtDrop) return
+          this.editor.update(() => {
+            // A drag can enter a never-focused composer with no Lexical selection.
+            // Establish the document end only after Host authorization succeeds.
+            if ($getSelection() === null) $getRoot().selectEnd()
+            this.insertFileReferences([reference])
+          }, { discrete: true })
+        }).catch(() => {})
+        return true
+      }, COMMAND_PRIORITY_CRITICAL),
       this.editor.registerCommand(BLUR_COMMAND, () => {
         // Finish this batch before an explicit focus can restore its updated selection.
         this.editor.update(preserveExternalSelection, { discrete: true })
@@ -128,6 +202,8 @@ export class DraftEditorRuntime {
       },
     )
     return () => {
+      this.disposed = true
+      this.dragDropAbort.abort()
       unregister()
       this.editor.setRootElement(null)
     }
@@ -177,8 +253,10 @@ export class DraftEditorRuntime {
    */
   refreshProjection(): EditorProjection {
     const prev = this.projected
-    this.projected = this.editor.getEditorState().read(() =>
+    const next = this.editor.getEditorState().read(() =>
       $projectComposer(key => this.occurrenceIdOf(key)))
+    if (next.clipboardText !== prev.clipboardText) this.draftRevision += 1
+    this.projected = next
     return prev
   }
 

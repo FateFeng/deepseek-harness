@@ -27,6 +27,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SubmitOutcome } from '../src/client/contract/input.ts'
+import { FILE_REFERENCE_DRAG_TYPE, serializeFileReferenceDrag } from '@deepseek-ai/dsh-file-reference/grammar'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import { $replaceDetectSpanWithText, $selectDetectSpan } from '../src/client/input/editor/span-map.ts'
 import type {
@@ -93,6 +94,8 @@ interface BenchOptions {
   nextStep?: InboxState['next-step']
   /** The hub's steer-all face (empty-draft accelerated Enter). */
   steerQueue?: () => void
+  /** Host-owned path check for Files-tree drag data. */
+  authorizeDraggedReference?: (path: string, kind: 'file' | 'directory', signal: AbortSignal) => Promise<boolean>
   variant?: 'hero' | 'composer'
   placeholder?: string
   t?: InputBarProps['t']
@@ -147,6 +150,9 @@ function bench(over?: BenchOptions) {
       'next-step': over?.nextStep ?? [],
     }),
     ...(over?.steerQueue !== undefined ? { steerQueue: over.steerQueue } : {}),
+    ...(over?.authorizeDraggedReference !== undefined
+      ? { authorizeDraggedReference: over.authorizeDraggedReference }
+      : {}),
     // Lexicon-only stub: adjudication untouched (undefined slash methods are
     // never reached — these benches drive plain-draft flows only).
     ...(lex !== undefined
@@ -2183,4 +2189,124 @@ it('places context usage below the composer and hides it until the activity clos
   fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
   expect(view.getByRole('dialog', { name: '上下文已用' })).toBeTruthy()
   expect(view.getByRole('button', { name: '发送消息' })).toBeTruthy()
+})
+
+describe('workspace file drag into composer', () => {
+  it('accepts a Host-authorized custom MIME file and folder path as structured references', async () => {
+    const authorizeDraggedReference = vi.fn((_path: string, _kind: 'file' | 'directory', _signal: AbortSignal) => Promise.resolve(true))
+    const { textarea, shell } = bench({ authorizeDraggedReference })
+    const file = { path: '/home/fate/code/Fate Docs/data.unknown-ext', kind: 'file' as const }
+    const folder = { path: '/home/fate/code/Fate Docs/research', kind: 'directory' as const }
+    const filePayload = serializeFileReferenceDrag(file)
+    const folderPayload = serializeFileReferenceDrag(folder)
+    if (filePayload === undefined || folderPayload === undefined) throw new Error('expected valid drag payloads')
+    const values = new Map<string, string>([[FILE_REFERENCE_DRAG_TYPE, filePayload]])
+    const dataTransfer = {
+      types: [FILE_REFERENCE_DRAG_TYPE],
+      dropEffect: 'none',
+      getData: vi.fn((type: string) => values.get(type) ?? ''),
+    }
+
+    expect(fireEvent.dragOver(textarea, { dataTransfer })).toBe(false)
+    expect(dataTransfer.dropEffect).toBe('copy')
+    expect(fireEvent.drop(textarea, { dataTransfer })).toBe(false)
+    expect(dataTransfer.getData).toHaveBeenCalledWith(FILE_REFERENCE_DRAG_TYPE)
+    expect(dataTransfer.getData).toHaveReturnedWith(filePayload)
+    expect(authorizeDraggedReference).toHaveBeenCalledWith(file.path, 'file', expect.any(AbortSignal))
+    await vi.waitFor(() => {
+      expect(shell.snapshot.occurrences).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'reference',
+          ref: '@"/home/fate/code/Fate Docs/data.unknown-ext"',
+          label: 'data.unknown-ext',
+          appearance: 'file',
+        }),
+      ]))
+    })
+    expect(shell.snapshot.attachmentIds).toEqual([])
+
+    values.set(FILE_REFERENCE_DRAG_TYPE, folderPayload)
+    expect(fireEvent.dragOver(textarea, { dataTransfer })).toBe(false)
+    expect(fireEvent.drop(textarea, { dataTransfer })).toBe(false)
+    expect(dataTransfer.getData).toHaveBeenCalledWith(FILE_REFERENCE_DRAG_TYPE)
+    expect(authorizeDraggedReference).toHaveBeenCalledWith(folder.path, 'directory', expect.any(AbortSignal))
+    await vi.waitFor(() => {
+      expect(shell.snapshot.occurrences).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          source: 'reference',
+          ref: '@"/home/fate/code/Fate Docs/research/"',
+          label: 'research/',
+          appearance: 'folder',
+        }),
+      ]))
+    })
+    expect(shell.snapshot.attachmentIds).toEqual([])
+  })
+
+  it('does not turn a forged DataTransfer path into a reference when Host denies it', async () => {
+    const authorizeDraggedReference = vi.fn(() => Promise.resolve(false))
+    const { textarea, shell } = bench({ authorizeDraggedReference })
+    const payload = serializeFileReferenceDrag({ path: '/etc/passwd', kind: 'file' })
+    if (payload === undefined) throw new Error('expected valid drag payload')
+    const dataTransfer = {
+      types: [FILE_REFERENCE_DRAG_TYPE],
+      dropEffect: 'none',
+      getData: (type: string) => type === FILE_REFERENCE_DRAG_TYPE ? payload : '',
+    }
+
+    expect(fireEvent.drop(textarea, { dataTransfer })).toBe(false)
+    expect(authorizeDraggedReference).toHaveBeenCalledWith('/etc/passwd', 'file', expect.any(AbortSignal))
+    await Promise.resolve()
+    expect(shell.snapshot.occurrences).toEqual([])
+  })
+
+  it('consumes malformed custom drag data instead of inserting its plain-text fallback', async () => {
+    const { textarea, shell } = bench()
+    const dataTransfer = {
+      types: [FILE_REFERENCE_DRAG_TYPE, 'text/plain'],
+      dropEffect: 'none',
+      getData: (type: string) => type === FILE_REFERENCE_DRAG_TYPE
+        ? '{malformed'
+        : '@"/etc/passwd"',
+    }
+
+    expect(fireEvent.drop(textarea, { dataTransfer })).toBe(false)
+    await Promise.resolve()
+    expect(shell.snapshot.occurrences).toEqual([])
+  })
+
+  it('fails closed when no Host authorization service is available', async () => {
+    const { textarea, shell } = bench()
+    const payload = serializeFileReferenceDrag({ path: '/home/work/notes.data', kind: 'file' })
+    if (payload === undefined) throw new Error('expected valid drag payload')
+    const dataTransfer = {
+      types: [FILE_REFERENCE_DRAG_TYPE],
+      dropEffect: 'none',
+      getData: (type: string) => type === FILE_REFERENCE_DRAG_TYPE ? payload : '',
+    }
+
+    expect(fireEvent.drop(textarea, { dataTransfer })).toBe(false)
+    await Promise.resolve()
+    expect(shell.snapshot.occurrences).toEqual([])
+  })
+
+  it('does not insert an authorized late result into a draft changed after drop', async () => {
+    const gate = Promise.withResolvers<boolean>()
+    const { textarea, shell } = bench({ draft: 'original', authorizeDraggedReference: () => gate.promise })
+    const payload = serializeFileReferenceDrag({ path: '/home/work/notes.data', kind: 'file' })
+    if (payload === undefined) throw new Error('expected valid drag payload')
+    const dataTransfer = {
+      types: [FILE_REFERENCE_DRAG_TYPE],
+      dropEffect: 'none',
+      getData: (type: string) => type === FILE_REFERENCE_DRAG_TYPE ? payload : '',
+    }
+
+    fireEvent.drop(textarea, { dataTransfer })
+    act(() => { shell.setDraft('new draft') })
+    act(() => { shell.setDraft('original') })
+    await act(async () => { gate.resolve(true); await gate.promise })
+    await Promise.resolve()
+    expect(shell.snapshot.draft).toBe('original')
+    expect(shell.snapshot.occurrences).toEqual([])
+  })
 })

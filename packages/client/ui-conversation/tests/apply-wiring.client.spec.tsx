@@ -14,6 +14,7 @@ const SID = 'session-1' as SessionId
 
 async function bench(options: { declareConversation?: boolean } = {}) {
   const runtime = await SlotTestRuntime.create()
+  runtime.ctx.provide('remote.workspaceFiles', { list: vi.fn() } as never)
   const developerTools = createSnapshotStore(true)
   runtime.ctx.provide('uiWorkspace', {
     openWorkspace: vi.fn(async (_workspaceId: unknown, beforeOpen: (id: SessionId) => void) => {

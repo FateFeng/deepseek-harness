@@ -48,6 +48,12 @@ export interface SessionInputDeps {
   messageSubmitted?: (submission: MessageSubmission) => void
   /** Enter adjudication face resolver; absent/undefined answer = every '/' line falls to the default sink. */
   inputTriggers?: (() => InputTriggerController | undefined) | undefined
+  /** Host proof for a Files-tree drop; absent means fail closed. */
+  authorizeDraggedReference?: (
+    path: string,
+    kind: 'file' | 'directory',
+    signal: AbortSignal,
+  ) => Promise<boolean>
   /** PopupSelect shell face resolver (dismissal on submit lock / escape). */
   popup?: (() => PopupDismissFace | undefined) | undefined
   /** Agent Inbox projection; its next-turn list is overlaid onto InputState.queue. */
@@ -185,6 +191,9 @@ export class SessionInputShell implements SessionInput {
         this.deps.inputTriggers?.()?.openReference(source, reference) ?? false,
       lexicon: () => this.lexicon.getSnapshot(),
       resolveLexicon: () => this.deps.inputTriggers?.()?.lexicon,
+      ...(this.deps.authorizeDraggedReference === undefined
+        ? {}
+        : { authorizeDraggedReference: this.deps.authorizeDraggedReference }),
     })
     this.unregister = this.draftEditor.register()
     this.state = createSnapshotStore<InputState>(this.compose())

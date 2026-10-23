@@ -54,6 +54,7 @@ const LAYOUT_CHILDREN = {
 } as const
 
 function provideWorkspaceNavigation(runtime: SlotTestRuntime): (id: SessionId) => void {
+  runtime.ctx.provide('remote.workspaceFiles', { list: vi.fn() } as never)
   let mainReference: ReturnType<typeof runtime.sessions.retain> | undefined
   const openSession = (id: SessionId): void => {
     const next = runtime.sessions.retain(id, { source: 'mainView' })

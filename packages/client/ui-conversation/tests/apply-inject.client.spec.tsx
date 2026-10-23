@@ -47,6 +47,7 @@ function sessionFakeFor() {
 
 async function bench(renderQuote = false) {
   const runtime = await SlotTestRuntime.create()
+  runtime.ctx.provide('remote.workspaceFiles', { list: vi.fn() } as never)
   const rootUpload = vi.fn(() => Promise.resolve({
     ok: true as const,
     value: {
