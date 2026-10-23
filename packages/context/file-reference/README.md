@@ -33,7 +33,11 @@ An `@path` token at the start of input or after whitespace triggers completion; 
 
 ### Getting candidates
 
-`ctx.fileReferences.list(agent, query, signal)` returns path-only file and directory candidates for one agent's working directory, deterministically ranked by the provider. Directory mentions render with a trailing `/` so completion can descend another level. Browser consumers call the Session Controller adapter as `ctx.remote.fileReferences.list`; the trailing signal cancels a slow autocomplete.
+`ctx.fileReferences.list(agent, query, signal)` returns file and directory candidates for one agent, deterministically ranked by the provider. `path` is the query and drill path, normally relative to the Session cwd; a Host may provide an optional canonical `referencePath` when a candidate is exposed through a virtual or attached-root alias. The picker uses that canonical path only on final selection. Directory mentions render with a trailing `/` so completion can descend another level. Browser consumers call the Session Controller adapter as `ctx.remote.fileReferences.list`; the trailing signal cancels a slow autocomplete.
+
+### Dragging from Files
+
+Files-panel rows can be dragged into the Agent composer. Regular files (regardless of extension) and directories become `@` references, not uploads or attached contents. The composer treats drag data as untrusted and asks the Host to verify the exact parent/name/type through the active authorized workspace root before inserting; unavailable or out-of-root paths fail closed.
 
 ### Pairing with a provider
 

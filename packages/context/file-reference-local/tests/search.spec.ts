@@ -91,6 +91,16 @@ describe('file-reference grammar', () => {
     expect(formatFileMention({ path: 'docs/design notes', kind: 'directory' }, false))
       .toBe('@"docs/design notes/')
     expect(formatFileMention({ path: 'README.md', kind: 'file' }, true)).toBe('@"README.md"')
+    expect(formatFileMention({
+      path: '.dsh-sources/FateDocs/readme.md',
+      referencePath: '/work/Fate Docs/readme.md',
+      kind: 'file',
+    }, false)).toBe('@"/work/Fate Docs/readme.md"')
+    expect(formatFileMention({
+      path: '.dsh-sources/FateDocs',
+      referencePath: '/work/FateDocs',
+      kind: 'directory',
+    }, false)).toBe('@/work/FateDocs/')
     expect(formatFileMention({ path: 'bad\nname', kind: 'file' }, false)).toBeUndefined()
     expect(formatFileMention({ path: 'bad "name".md', kind: 'file' }, false)).toBeUndefined()
     expect(formatFileMention({ path: 'bad"name.md', kind: 'file' }, false)).toBeUndefined()

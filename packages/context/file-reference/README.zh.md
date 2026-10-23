@@ -33,7 +33,11 @@ kind: "package-reference"
 
 ### 获取候选
 
-`ctx.fileReferences.list(agent, query, signal)` 返回指定 agent 工作目录中仅含路径的文件与目录候选，由提供方确定性地排序。目录 mention 呈现时带尾随 `/`，使补全可以继续深入下一层。浏览器消费方通过 Session Controller 适配器的 `ctx.remote.fileReferences.list` 调用同一发现能力；末位 signal 参数可取消慢速自动补全。
+`ctx.fileReferences.list(agent, query, signal)` 返回指定 agent 的文件与目录候选，由提供方确定性地排序。`path` 是查询与下钻路径，通常相对 Session cwd；Host 通过虚拟或附加根别名公开候选时，可提供可选的规范 `referencePath`。只有最终选中时，选择器才使用该规范路径。目录 mention 呈现时带尾随 `/`，使补全可以继续深入下一层。浏览器消费方通过 Session Controller 适配器的 `ctx.remote.fileReferences.list` 调用同一发现能力；末位 signal 参数可取消慢速自动补全。
+
+### 从 Files 拖入引用
+
+Files 面板中的文件行可以拖入 Agent 输入框。普通文件（不限制扩展名）和目录会变成 `@` 引用，不会作为上传附件或文件内容加入提示词。输入框把拖拽数据视为不可信；插入前会让 Host 在当前已授权的工作区根目录下核对准确的父目录、名称和类型。路径不可用或位于根目录之外时会拒绝插入。
 
 ### 搭配提供方
 

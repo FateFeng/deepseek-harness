@@ -136,7 +136,7 @@ export function apply(ctx: ClientContext): void {
         // row chevron / a header crumb) keeps the literal descent text and
         // the open menu.
         if (value.fileKind === 'directory' && action === 'drill') {
-          return { text: value.mention, continue: true }
+          return { text: value.queryMention ?? value.mention, continue: true }
         }
         return {
           insert: {
@@ -180,7 +180,7 @@ export function apply(ctx: ClientContext): void {
 type Translate = (key: ReferenceKey, params?: Record<string, unknown>) => string
 
 type ReferenceCandidateValue =
-  | { kind: 'file'; fileKind: FileReferenceCandidate['kind']; label: string; mention: string }
+  | { kind: 'file'; fileKind: FileReferenceCandidate['kind']; label: string; mention: string; queryMention?: string }
   | { kind: 'session'; label: string; mention: string }
 
 /**
@@ -206,6 +206,36 @@ function crumbsFor(
   const slash = query.lastIndexOf('/')
   if (slash < 0) return undefined
   const segments = query.slice(0, slash).split('/').filter(segment => segment !== '')
+  if (segments[0] === '.dsh-sources') {
+    const sourcesPath = formatFileMention({ path: '.dsh-sources', kind: 'directory' }, quoted)
+    if (sourcesPath === undefined) return undefined
+    const crumbs: InputTriggerCrumb[] = [{
+      label: t('crumb.sources'),
+      value: directoryValue(t('crumb.sources'), sourcesPath),
+      ...(segments.length === 1 ? { current: true } : {}),
+    }]
+    const alias = segments[1]
+    if (alias === undefined) return crumbs
+    const rootPath = `.dsh-sources/${alias}`
+    const rootMention = formatFileMention({ path: rootPath, kind: 'directory' }, quoted)
+    if (rootMention === undefined) return undefined
+    crumbs.push({
+      label: alias,
+      value: directoryValue(alias, rootMention),
+      ...(segments.length === 2 ? { current: true } : {}),
+    })
+    for (const [index, segment] of segments.slice(2).entries()) {
+      const path = `${rootPath}/${segments.slice(2, index + 3).join('/')}`
+      const mention = formatFileMention({ path, kind: 'directory' }, quoted)
+      if (mention === undefined) return undefined
+      crumbs.push({
+        label: segment,
+        value: directoryValue(segment, mention),
+        ...(index === segments.length - 3 ? { current: true } : {}),
+      })
+    }
+    return crumbs
+  }
   const crumbs: InputTriggerCrumb[] = [{
     label: t('crumb.root'),
     value: directoryValue(t('crumb.root'), quoted ? '@"' : '@'),
@@ -239,6 +269,9 @@ function fileCandidate(
 ) {
   const mention = formatFileMention(candidate, preserveQuote)
   if (mention === undefined) return []
+  const queryMention = candidate.referencePath === undefined
+    ? undefined
+    : formatFileMention({ path: candidate.path, kind: candidate.kind }, preserveQuote)
   const slash = candidate.path.lastIndexOf('/')
   const name = candidate.path.slice(slash + 1)
   const parent = slash < 0 ? '' : candidate.path.slice(0, slash)
@@ -248,6 +281,7 @@ function fileCandidate(
     fileKind: candidate.kind,
     label: name,
     mention,
+    ...(queryMention !== undefined && queryMention !== mention ? { queryMention } : {}),
   }
   return [{
     name: `${name}${directory ? '/' : ''}`,

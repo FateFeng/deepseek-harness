@@ -579,6 +579,22 @@ describe('directory header', () => {
       .toEqual(['@"', '@"my dir/', '@"my dir/sub/'])
   })
 
+  it('shows a navigable attached-root breadcrumb without leaking its query alias into the mention', async () => {
+    const { source } = await bench()
+    const crumbs = source.header?.(session, {
+      query: '.dsh-sources/Fate Docs/src/', quoted: true, drilled: true,
+    })
+    expect(crumbs?.map(crumb => ({
+      label: crumb.label,
+      mention: (JSON.parse(crumb.value) as { mention: string }).mention,
+      current: crumb.current,
+    }))).toEqual([
+      { label: 'Attached folders', mention: '@".dsh-sources/', current: undefined },
+      { label: 'Fate Docs', mention: '@".dsh-sources/Fate Docs/', current: undefined },
+      { label: 'src', mention: '@".dsh-sources/Fate Docs/src/', current: true },
+    ])
+  })
+
   it('publishes no header when a segment cannot be written back as mention text', async () => {
     const { source } = await bench()
     expect(source.header?.(session, { query: 'ok/we\u0001ird/', drilled: true })).toBeUndefined()
@@ -653,6 +669,42 @@ describe('pick and codec', () => {
     expect(drill(source, quotedDirectory!)).toEqual({ text: '@"src/', continue: true })
   })
 
+  it('drills attached roots with a virtual query path but inserts the authorized absolute file path', async () => {
+    const files: RemoteLookup<FileReferenceCandidate> = vi.fn((_id, query) => Promise.resolve({
+      ok: true as const,
+      value: query === '.dsh-sources/'
+        ? [{
+          path: '.dsh-sources/Fate Docs', kind: 'directory' as const,
+          referencePath: '/work/Fate Docs',
+        }]
+        : [{
+          path: '.dsh-sources/Fate Docs/read me.md', kind: 'file' as const,
+          referencePath: '/work/Fate Docs/read me.md',
+        }],
+    }))
+    const { source } = await bench(files)
+    const [root] = await source.candidates(session, request('.dsh-sources/'))
+    expect(root?.name).toBe('Fate Docs/')
+    expect(source.onPick({
+      candidate: root!, session, position: 'inline', via: 'menu', action: 'drill',
+      span: { start: 0, end: 15, draftRev: 1 },
+    })).toEqual({ text: '@".dsh-sources/Fate Docs/', continue: true })
+
+    const [file] = await source.candidates(session, request('.dsh-sources/Fate Docs/', { quoted: true }))
+    expect(source.onPick({
+      candidate: file!, session, position: 'inline', via: 'menu', action: 'pick',
+      span: { start: 0, end: 34, draftRev: 1 },
+    })).toEqual({
+      insert: {
+        source: 'reference',
+        ref: '@"/work/Fate Docs/read me.md"',
+        label: 'read me.md',
+        appearance: 'file',
+        clipboardText: '@"/work/Fate Docs/read me.md"',
+      },
+    })
+  })
+
   it('inserts sessions as atomic chips whose clipboard and model forms are canonical mentions', async () => {
     const { source } = await bench()
     const candidates = await source.candidates(session, request(''))
@@ -696,11 +748,13 @@ describe('reference preview', () => {
     const openResource = vi.spyOn(ctx.sidebarRight, 'openResource')
     expect(source.openReference?.(session, { ref: '@notes/readme.md', appearance: 'file' })).toBe(true)
     expect(source.openReference?.(session, { ref: '@"docs/a b.md"', appearance: 'file' })).toBe(true)
+    expect(source.openReference?.(session, { ref: '@"/work/Fate Docs/read me.md"', appearance: 'file' })).toBe(true)
     expect(openResource).toHaveBeenNthCalledWith(1, 'dsh-resource://file/session/target/notes/readme.md')
     expect(openResource).toHaveBeenNthCalledWith(2, 'dsh-resource://file/session/target/docs/a%20b.md')
+    expect(openResource).toHaveBeenNthCalledWith(3, 'dsh-resource://file/session/target//work/Fate%20Docs/read%20me.md')
     expect(source.openReference?.(session, { ref: '@docs/', appearance: 'folder' })).toBe(false)
     expect(source.openReference?.(session, { ref: '@[Research](dsh-session:abc)', appearance: 'session' })).toBe(false)
-    expect(openResource).toHaveBeenCalledTimes(2)
+    expect(openResource).toHaveBeenCalledTimes(3)
     await fiber.dispose()
   })
 })
