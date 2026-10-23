@@ -62,7 +62,7 @@ async function bench() {
     name: 'root',
     children: {
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
-      'sidebar.right.tab.files.actions': { kind: 'list', scope: 'session' },
+      'sidebar.right.tab.files.actions': { kind: 'list', scope: 'root' },
       'sidebar.right.tab.document.actions': { kind: 'list', scope: 'session' },
       'sidebar.right.tab.document.unpreviewable': { kind: 'list', scope: 'session' },
       'deliverables.file.actions': { kind: 'list', scope: 'session' },
