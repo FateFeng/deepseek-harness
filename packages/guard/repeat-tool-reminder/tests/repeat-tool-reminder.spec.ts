@@ -407,4 +407,50 @@ describe('config validation fails loud', () => {
     const ctx2 = await spine()
     await expect(ctx2.plugin(RepeatToolGuard, { argumentsPreviewChars: 12.5 })).rejects.toThrow(/argumentsPreviewChars/)
   })
+
+  it('rejects invalid hard-stop settings', async () => {
+    const ctx = await spine()
+    await expect(ctx.plugin(RepeatToolGuard, { blockAt: 1 })).rejects.toThrow(/blockAt/)
+    const ctx2 = await spine()
+    await expect(ctx2.plugin(RepeatToolGuard, { maxTrackedCallsPerTurn: 1.5 })).rejects.toThrow(/maxTrackedCallsPerTurn/)
+  })
+})
+
+describe('hard loop boundaries', () => {
+  it('denies the next exact repeat before execution when blockAt is reached', async () => {
+    const ctx = await harness({ blockAt: 3 })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 'same' }),
+      toolCallResponse('c2', 'probe', { q: 'same' }),
+      toolCallResponse('c3', 'probe', { q: 'same' }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    const results = agent.session.snapshotEvents().filter((e): e is SessionEvent<'tool/result'> => e.type === 'tool/result')
+    expect(results).toHaveLength(3)
+    expect(results[2]!.data.message.isError).toBe(true)
+    expect(results[2]!.data.message.content).toEqual([{ type: 'text', text: expect.stringContaining('blocked exact repeat') }])
+  })
+
+  it('denies tracked calls after the per-user-turn budget', async () => {
+    const ctx = await harness({ maxTrackedCallsPerTurn: 2 })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 1 }),
+      toolCallResponse('c2', 'other', { q: 2 }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    const results = agent.session.snapshotEvents().filter((e): e is SessionEvent<'tool/result'> => e.type === 'tool/result')
+    expect(results).toHaveLength(2)
+    expect(results[1]!.data.message.isError).toBe(true)
+    expect(results[1]!.data.message.content).toEqual([{ type: 'text', text: expect.stringContaining('blocked after 2 tracked calls') }])
+  })
 })

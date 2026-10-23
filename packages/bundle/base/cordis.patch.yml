@@ -445,6 +445,10 @@
       name: '@deepseek-ai/dsh-repeat-tool-reminder'
       config:
         thresholds: [3, 5, 8]
+        # Stop exact-call loops and cap tracked exploration per user turn.
+        # The package keeps both controls disabled by default for downstream compatibility.
+        blockAt: 8
+        maxTrackedCallsPerTurn: 24
         argumentsPreviewChars: 500
 
     # The shared base enables the stable model-facing web_search and web_fetch

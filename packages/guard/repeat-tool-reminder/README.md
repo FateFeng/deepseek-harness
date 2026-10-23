@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package helps a model escape loops in which it calls the same tool with identical arguments without making progress. At configured repeat counts, it asks the model to inspect the previous result and change approach or finish. The reminder is advisory: it never blocks or delays a legitimate repeated call. Repeats are tracked separately for each agent and cleared by a new user message. The `dsh` base bundle enables the package with reminders at 3, 5, and 8 repeats.
+This package helps an agent escape tool loops and contain runaway exploration. At configured repeat counts, it asks the model to inspect the previous result and change approach or finish. Optional hard boundaries can deny an exact repeat and cap tracked calls within one user turn. The hard boundaries are disabled by package defaults for compatibility; the `dsh` base bundle enables `blockAt: 8` and `maxTrackedCallsPerTurn: 24` as a stopgap against self-reply loops. Repeats and budgets are tracked separately for each agent and cleared by a new user message.
 
 ## Table of Contents
 
@@ -39,6 +39,8 @@ When you want to change when reminders fire or which tools they cover, mount the
 - name: '@deepseek-ai/dsh-repeat-tool-reminder'
   config:
     thresholds: [3, 5, 8]        # remind at 3, 5, and 8 consecutive repeats
+    blockAt: 8                    # deny the next exact repeat; 0 disables
+    maxTrackedCallsPerTurn: 24    # deny after 24 tracked calls; 0 disables
     include: []                  # track every tool; list patterns to track only some
     exclude: [todo_write]        # never track these tools
     argumentsPreviewChars: 500   # cap on arguments shown in the detailed reminder
@@ -47,6 +49,8 @@ When you want to change when reminders fire or which tools they cover, mount the
 | Field | Default | Meaning |
 |---|---|---|
 | `thresholds` | `[3, 5, 8]` | Repeat counts that trigger a reminder |
+| `blockAt` | `0` | Hard-deny the next exact repeat at this count; `0` is advisory-only |
+| `maxTrackedCallsPerTurn` | `0` | Hard-deny tracked calls after this per-user-turn budget; `0` disables |
 | `include` | `[]` | Only these tools are tracked; empty means every tool |
 | `exclude` | `[]` | These tools are never tracked; calls to them neither count nor reset |
 | `argumentsPreviewChars` | `500` | How many characters of the repeated arguments the detailed reminder shows |
@@ -55,7 +59,7 @@ Invalid configuration fails at startup with a clear error — an empty `threshol
 
 ### What you get
 
-With the defaults, a model that repeats the same call with identical arguments receives a short reminder on the third repeat — to analyze the previous result before calling again — and detailed reminders on the fifth and eighth, naming the tool and the repeated arguments so it can decide whether to change approach, gather more evidence, or finish. A new user message clears the count, so a fresh instruction is never treated as a loop. Reminders appear in the conversation after the repeated call's result, attributed to the plugin, so the model reads them like any other message.
+With the package defaults, a model that repeats the same call with identical arguments receives a short reminder on the third repeat and detailed reminders on the fifth and eighth. When `blockAt` is enabled, the next exact repeat is denied before execution. When `maxTrackedCallsPerTurn` is enabled, the next tracked call after the per-user-turn budget is denied. A new user message clears the chain and budget, so a fresh instruction is never treated as a loop. Reminders appear after the tool result, attributed to the plugin; hard stops are returned as ordinary pre-execution denials so downstream policy can still observe them.
 
 -----
 
@@ -167,7 +171,8 @@ These limits define when the guard is a poor fit. They are current package const
 
 - **Exact-match detection only** — canonicalization is a deep key-sort, so near-identical variants (a tweaked path, extra whitespace inside a value) evade the chain; fuzzy matching is rejected pending evidence of need.
 - **Compaction does not reset chains** — a chain spanning a compaction checkpoint keeps counting.
-- **Advisory only** — escalating to a blocking form at a high threshold is not implemented, though `PostToolDecision` already supports blocking.
+- **Semantic scope drift is not inferred** — the guard does not understand whether two different searches have the same human objective; use `maxTrackedCallsPerTurn` as the coarse stopgap until a task-scoped progress contract exists.
+- **Hard boundaries are deployment policy** — `blockAt` and `maxTrackedCallsPerTurn` deny calls and may stop legitimate long tasks; tune them per profile, and keep the package defaults disabled for compatibility.
 - **No subagent chain-sharing** — chains stay isolated per agent; a parent and its subagent repeating the same call never combine.
 - **Legitimate idempotent polling still draws nudges** past the thresholds — the pressure valves are the `thresholds`/`exclude` config.
 - **Past the highest threshold a chain goes silent** — reminders fire only at exact configured counts, never beyond them.
