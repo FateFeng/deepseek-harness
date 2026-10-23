@@ -171,6 +171,14 @@ export interface PiAiProviderProfile {
    * requests instead of being rejected by a request-size cap.
    */
   maxRequestImageBytes?: number
+  /**
+   * Estimated total request-body byte bound for this route. A request whose
+   * projected wire size exceeds it first offloads oldest retained images; when
+   * even the image-free remainder no longer fits, the request fails locally
+   * with `INVALID_REQUEST` instead of shipping a body the provider will reject
+   * with HTTP 413. Omission leaves the total-body gate unchecked.
+   */
+  maxRequestBytes?: number
   /** Total-pixel budget for each deterministic inline request version. */
   requestImagePixelBudget?: number
   /**
@@ -343,6 +351,7 @@ const profile = z.object({
   websocketConnectTimeoutMs: z.natural(),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
+  maxRequestBytes: z.number().step(1).min(1),
   requestImagePixelBudget: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
   requestImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
   retryPolicy: RetryPolicySchema,
@@ -437,6 +446,10 @@ export function resolveProfiles(
     const maxRequestImageBytes = source.maxRequestImageBytes ?? DEFAULT_MAX_REQUEST_IMAGE_BYTES
     if (!Number.isInteger(maxRequestImageBytes) || maxRequestImageBytes <= 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" maxRequestImageBytes must be a positive integer`)
+    }
+    if (source.maxRequestBytes !== undefined
+      && (!Number.isSafeInteger(source.maxRequestBytes) || source.maxRequestBytes <= 0)) {
+      throw new Error(`llm-pi-ai: provider "${provider}" maxRequestBytes must be a positive safe integer`)
     }
     const requestImagePixelBudget = source.requestImagePixelBudget ?? DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET
     if (!Number.isSafeInteger(requestImagePixelBudget) || requestImagePixelBudget <= 0) {

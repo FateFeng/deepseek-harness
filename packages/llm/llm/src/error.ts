@@ -103,6 +103,20 @@ export function isQuotaExceededError(detail: string): boolean {
 }
 
 /**
+ * Recognize wording that identifies a request rejected for its transport byte
+ * size (an HTTP 413 from a gateway or provider size cap), as opposed to a
+ * model context-window overflow. Recovery means shrinking the request —
+ * offloading images or starting a fresh session — not resending it.
+ * @param detail - provider error code/type/message text joined into one string.
+ * @returns true only for request-body-size rejections, never for context overflow.
+ */
+export function isRequestTooLargeError(detail: string): boolean {
+  return /\b413\b/.test(detail)
+    || /failed to buffer the request body:\s*length limit exceeded/i.test(detail)
+    || /\b(?:payload|request body|request entity)[\s_-]+too[\s_-]+large\b/i.test(detail)
+}
+
+/**
  * Render a thrown value with its full `cause` chain and AggregateError
  * members, so transport wrappers like undici's `TypeError: fetch failed`
  * surface the underlying failure instead of masking it. Plain structured

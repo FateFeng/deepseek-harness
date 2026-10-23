@@ -938,6 +938,18 @@ describe('mapStopReason / mapUsage', () => {
     }))).toMatchObject({ kind: 'error', failure: { code: 'PI_AI_ERROR' } })
   })
 
+  it('explains a request-size rejection with the remaining recovery actions', () => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage: '413 Request Entity Too Large\n' })))
+      .toEqual({
+        kind: 'error',
+        failure: {
+          message: "the request exceeded the provider's request-size limit (HTTP 413); "
+            + 'start a new session or shorten the input (413 Request Entity Too Large)',
+          code: 'INVALID_REQUEST',
+        },
+      })
+  })
+
   it.each([
     'other side closed',
     'HTTP2 request did not get a response',

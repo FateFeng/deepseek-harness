@@ -895,6 +895,9 @@ describe('provider profile lifecycle', () => {
       .toBe(DEFAULT_MAX_REQUEST_IMAGE_BYTES)
     expect(resolveProfiles({ openai: { maxRequestImageBytes: 1024 } }).get('openai')?.maxRequestImageBytes)
       .toBe(1024)
+    expect(resolveProfiles({ openai: {} }).get('openai')?.maxRequestBytes).toBeUndefined()
+    expect(resolveProfiles({ openai: { maxRequestBytes: 2_000_000 } }).get('openai')?.maxRequestBytes)
+      .toBe(2_000_000)
   })
 
   it.each([

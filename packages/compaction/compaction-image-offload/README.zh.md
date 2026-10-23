@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-凡是运行 agent loop（智能体循环）并带有支持图片的路由的组合，都应挂载本插件，随附的 `dsh` 基础配置已经挂载。没有它，`IMAGE_OFFLOAD_REQUIRED` 失败会进入普通恢复并以错误结束该轮次。本插件没有配置：DeepSeek 适配器执行其 file 模式和内联回退预算，pi-ai 适配器执行其 base64 上限，各自上报需要省略的数量。
+凡是运行 agent loop（智能体循环）并带有支持图片的路由的组合，都应挂载本插件，随附的 `dsh` 基础配置已经挂载。没有它，`IMAGE_OFFLOAD_REQUIRED` 失败会进入普通恢复并以错误结束该轮次。本插件没有配置：DeepSeek 适配器执行其 file 模式和内联回退预算，pi-ai 适配器执行其 base64 上限，各自上报需要省略的数量。与路由预算无关，提供方按请求体积拒收（HTTP 413，归类为措辞含 too large 的 `INVALID_REQUEST`）时按同一可修复条件处理：卸载一半保留图片并重试，按对数次尝试收敛。
 
 ### 最小可用组合
 
@@ -39,7 +39,7 @@ kind: "package-reference"
 
 ### 失败与恢复
 
-本插件只处理带 `offloadImages` 的 `IMAGE_OFFLOAD_REQUIRED` 失败。它按模型请求顺序遍历表层，跳过 assistant 节点和已经标记的图片，给指定数量的出现位置打标记。没有可省略的图片时在 `agent/request-error` waterfall 上委派下游，由下游恢复或普通的轮次错误处理。这次重试不占提供方重试预算，也不追加 `llm/retry` 事件。记录选择前发生取消时会委派后续处理，不新增 `image/offload` 事件；选择提交后发生取消时停止重试，但保留省略记录。
+本插件处理带 `offloadImages` 的 `IMAGE_OFFLOAD_REQUIRED` 失败，以及措辞命中请求体积过大特征的 `INVALID_REQUEST` 失败（端点真实字节上限低于路由配置上限的情形）。它按模型请求顺序遍历表层，跳过 assistant 节点和已经标记的图片并打标记——预算失败按上报数量，体积拒收按保留数量的一半。没有可省略的图片时在 `agent/request-error` waterfall 上委派下游，由下游恢复或普通的轮次错误处理。这次重试不占提供方重试预算，也不追加 `llm/retry` 事件。记录选择前发生取消时会委派后续处理，不新增 `image/offload` 事件；选择提交后发生取消时停止重试，但保留省略记录。
 
 -----
 

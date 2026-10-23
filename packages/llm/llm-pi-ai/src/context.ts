@@ -27,6 +27,70 @@ function flattenText(message: RequestMessage): string {
     .join('')
 }
 
+/** Fixed JSON envelope allowance around messages and tool declarations in one request body. */
+const REQUEST_ENVELOPE_BYTES = 16 * 1024
+
+/** Base64 length of raw image bytes plus the data-URL prefix, including padding. */
+function imageWireBytes(rawBytes: number): number {
+  return Math.ceil(rawBytes / 3) * 4 + 64
+}
+
+/**
+ * Conservative wire-size estimate for one text value: three bytes per
+ * non-ASCII code unit (surrogate pairs overcount, which is safe here) plus a
+ * quarter allowance for JSON escaping.
+ */
+function estimateWireTextBytes(text: string): number {
+  let nonAscii = 0
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) > 0x7f) nonAscii += 1
+  }
+  return Math.ceil((text.length - nonAscii + nonAscii * 3) * 1.25)
+}
+
+/** Estimated request-body bytes split into retained-image payload and everything else. */
+interface RequestWireEstimate {
+  /** Total estimated request-body bytes, envelope included. */
+  total: number
+  /** Estimated bytes of the retained image occurrences only. */
+  imageBytes: number
+}
+
+/**
+ * Estimate one request's wire size before serialization. Text and tool
+ * declarations are padded; retained images use their exact request-version
+ * bytes. The estimate exists to trip the total-body gate early, not to
+ * reproduce the serializer byte for byte.
+ * @param systemPrompt - resolved system prompt text, when present.
+ * @param messages - complete request history.
+ * @param tools - provider tool declarations.
+ * @param requestImages - resolved request-image versions by attachment id.
+ * @returns estimated totals in bytes.
+ */
+function estimateRequestWireBytes(
+  systemPrompt: string | undefined,
+  messages: readonly RequestMessage[],
+  tools: GenerateOptions['tools'],
+  requestImages: ReadonlyMap<AttachmentId, RequestImageAttachment>,
+): RequestWireEstimate {
+  let imageBytes = 0
+  let otherBytes = REQUEST_ENVELOPE_BYTES
+    + (systemPrompt === undefined ? 0 : estimateWireTextBytes(systemPrompt))
+    + (tools === undefined ? 0 : Math.ceil(JSON.stringify(tools).length * 1.25))
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type === 'text' || block.type === 'reasoning') {
+        otherBytes += estimateWireTextBytes(block.text)
+      } else if (block.type === 'image' && block.offloaded !== true) {
+        imageBytes += imageWireBytes(requestImages.get(block.attachment.attachmentId)?.bytes ?? block.attachment.bytes)
+      } else {
+        otherBytes += Math.ceil(JSON.stringify(block).length * 1.25)
+      }
+    }
+  }
+  return { total: imageBytes + otherBytes, imageBytes }
+}
+
 
 /** Recover the pi-ai toolResult message for one harness tool-role message. */
 function toolResultOf(
@@ -264,6 +328,13 @@ export interface PiImageRequestContext {
   resolveImageAccess: ImageAttachmentAccessResolver
   /** Request-level bound on the base64-encoded payload of retained images; omission leaves the bound unchecked. */
   maxRequestImageBytes?: number
+  /**
+   * Estimated total request-body byte bound. A projection exceeding it fails
+   * with `IMAGE_OFFLOAD_REQUIRED` while retained images can still shrink the
+   * body, and with `INVALID_REQUEST` once even the image-free remainder no
+   * longer fits. Omission leaves the total-body gate unchecked.
+   */
+  maxRequestBytes?: number
   /** Route pixel and raw encoded-byte budgets. */
   requestImagePolicy?: PiImageRequestBudget
 }
@@ -332,7 +403,7 @@ async function toPiContextWithImages(
   images: PiImageRequestContext,
   onReplayDegrade?: (reason: string) => void,
 ): Promise<PiContext> {
-  const { attachments, resolveImageAccess, maxRequestImageBytes } = images
+  const { attachments, resolveImageAccess, maxRequestImageBytes, maxRequestBytes } = images
   const requestImagePolicy = images.requestImagePolicy ?? {
     maxPixels: DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET,
     maxBytes: DEFAULT_REQUEST_IMAGE_MAX_BYTES,
@@ -351,6 +422,32 @@ async function toPiContextWithImages(
         `pi-ai request images exceed the ${maxRequestImageBytes}-byte base64 bound; ${offloadImages} more oldest occurrence(s) must be offloaded.`,
         IMAGE_OFFLOAD_REQUIRED_CODE,
         { offloadImages },
+      )
+    }
+  }
+  if (maxRequestBytes !== undefined) {
+    // Total-body gate: an image-only bound cannot stop a request whose text and
+    // images together still exceed the provider's byte cap (observed as HTTP 413).
+    const estimate = estimateRequestWireBytes(split.systemPrompt, split.messages, options.tools, requestImages)
+    if (estimate.total > maxRequestBytes) {
+      const nonImageBytes = estimate.total - estimate.imageBytes
+      if (estimate.imageBytes > 0 && nonImageBytes < maxRequestBytes) {
+        const offloadImages = requiredImageOffload(
+          split.messages,
+          { representation: 'base64', maxBytes: maxRequestBytes - nonImageBytes },
+          block => (requestImages.get(block.attachment.attachmentId) as RequestImageAttachment).bytes,
+        )
+        if (offloadImages > 0) {
+          throw new LlmError(
+            `pi-ai request body is estimated at ${estimate.total} bytes, exceeding the ${maxRequestBytes}-byte bound; ${offloadImages} more oldest occurrence(s) must be offloaded.`,
+            IMAGE_OFFLOAD_REQUIRED_CODE,
+            { offloadImages },
+          )
+        }
+      }
+      throw new LlmError(
+        `pi-ai request body is estimated at ${estimate.total} bytes, exceeding the ${maxRequestBytes}-byte bound even without images; start a new session or shorten the input`,
+        'INVALID_REQUEST',
       )
     }
   }

@@ -6,7 +6,7 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import { createDeveloperMessage, ToolCallId, createAssistantMessage, createMessage, createToolResultMessage, createUserMessage, offloadedImageText } from '@deepseek-ai/dsh-llm'
+import { createDeveloperMessage, ToolCallId, createAssistantMessage, createMessage, createToolResultMessage, createUserMessage, IMAGE_OFFLOAD_REQUIRED_CODE, offloadedImageText } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message, RequestUserInput } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { toPiContext } from '../src/context.ts'
@@ -106,6 +106,26 @@ describe('pi-ai request context conversion', () => {
     expect(withImage).not.toHaveProperty('id')
     expect(withImage).not.toHaveProperty('source')
   })
+
+  it('requires image offload when the estimated request body exceeds maxRequestBytes', async () => {
+    const store = projectionStore(vi.fn(
+      (value: ImageAttachmentRef) => Promise.resolve(requestImage(value, new Uint8Array(40_000))),
+    ))
+    const message = user([{ type: 'text', text: 'x'.repeat(1_000) }, { type: 'image', attachment: ref }])
+    await expect(toPiContext(request([message]), imageContext(store, { maxRequestBytes: 30_000 })))
+      .rejects.toMatchObject({ code: IMAGE_OFFLOAD_REQUIRED_CODE, failure: { offloadImages: 1 } })
+    // The same request passes when the total-body gate is not configured.
+    await expect(toPiContext(request([message]), imageContext(store))).resolves.toBeTruthy()
+  })
+
+  it('fails locally when even the image-free body exceeds maxRequestBytes', async () => {
+    const message = user([{ type: 'text', text: 'x'.repeat(100_000) }])
+    await expect(toPiContext(request([message]), imageContext(attachments, { maxRequestBytes: 30_000 })))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(toPiContext(request([message]), imageContext(attachments, { maxRequestBytes: 30_000 })))
+      .rejects.toThrow(/even without images/)
+  })
+
 
   it('omits absent and empty request-level optional fields', () => {
     const base = { provider: 'openai', model: 'gpt-4.1', messages: [] }

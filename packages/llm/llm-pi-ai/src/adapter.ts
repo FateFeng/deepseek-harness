@@ -408,6 +408,7 @@ export class PiAiAdapter extends LlmAdapter {
           attachments,
           resolveImageAccess: ref => this.config.resolveImageAccess?.(attachments, ref),
           maxRequestImageBytes: profile.maxRequestImageBytes,
+          ...profile.maxRequestBytes === undefined ? {} : { maxRequestBytes: profile.maxRequestBytes },
           requestImagePolicy: {
             maxPixels: profile.requestImagePixelBudget,
             maxBytes: profile.requestImageMaxBytes,

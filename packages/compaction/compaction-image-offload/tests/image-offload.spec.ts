@@ -64,6 +64,13 @@ function offloadRequired(offloadImages: number): () => never {
   }
 }
 
+/** A provider-side request-size rejection that never passed through a route image budget. */
+function payloadTooLarge(): () => never {
+  return () => {
+    throw new LlmError('413 Request Entity Too Large', 'INVALID_REQUEST')
+  }
+}
+
 async function harness(adapter: ScriptedAdapter): Promise<Context> {
   const ctx = new Context()
   contexts.push(ctx)
@@ -301,6 +308,60 @@ describe('compaction-image-offload', () => {
     expect(events[decision.seq + 1]).toMatchObject({ type: 'request/header', data: { reason: 'series' } })
     const durable = events[original]!
     expect(durable.type === 'user/message' ? durable.data.content[0] : undefined).not.toHaveProperty('offloaded')
+  })
+
+  it('peels half the retained images and retries on a provider 413 size rejection', async () => {
+    const adapter = new ScriptedAdapter([payloadTooLarge(), payloadTooLarge(), textResponse('sent')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('offload-413'), { provider: 'mock', model: 'mock' })
+
+    agent.followup(createUserMessage({
+      content: [image('a'), image('b'), image('c'), image('d')],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(3)
+    expect(offloadedNames(adapter.requests[0]!)).toEqual([])
+    expect(offloadedNames(adapter.requests[1]!)).toEqual(['a', 'b'])
+    expect(offloadedNames(adapter.requests[2]!)).toEqual(['a', 'b', 'c'])
+    const original = agent.session.snapshotEvents().find(event => event.type === 'user/message')!.seq
+    expect(decisions(agent.session).map(event => event.data.targets)).toEqual([
+      [{ seq: original, imageIndexes: [0, 1] }],
+      [{ seq: original, imageIndexes: [2] }],
+    ])
+  })
+
+  it('lets a 413 failure proceed normally when no retained images remain', async () => {
+    const adapter = new ScriptedAdapter([payloadTooLarge()])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('offload-413-empty'), { provider: 'mock', model: 'mock' })
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'plain text only' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(decisions(agent.session)).toEqual([])
+    const events = agent.session.snapshotEvents()
+    expect(events.at(-1)?.type).toBe('turn/end')
+  })
+
+  it('ignores invalid-request failures that are not size rejections', async () => {
+    const adapter = new ScriptedAdapter([() => { throw new LlmError('HTTP 400: malformed tool schema', 'INVALID_REQUEST') }])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('offload-400'), { provider: 'mock', model: 'mock' })
+
+    agent.followup(createUserMessage({
+      content: [image('a')],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(decisions(agent.session)).toEqual([])
   })
 
   it('counts the adapter prefix in request order after a surface replacement', async () => {

@@ -25,7 +25,7 @@ Image-heavy conversations continue when older images exceed a model route's budg
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount this plugin in every composition that runs the agent loop with an image-capable route. The shipped `dsh` base does. Without it, an `IMAGE_OFFLOAD_REQUIRED` failure reaches ordinary recovery and ends the turn as an error. The plugin has no configuration: the DeepSeek adapter enforces its file-mode and inline-fallback budgets, the pi-ai adapter its base64 bound, and each reports the count it needs offloaded.
+Mount this plugin in every composition that runs the agent loop with an image-capable route. The shipped `dsh` base does. Without it, an `IMAGE_OFFLOAD_REQUIRED` failure reaches ordinary recovery and ends the turn as an error. The plugin has no configuration: the DeepSeek adapter enforces its file-mode and inline-fallback budgets, the pi-ai adapter its base64 bound, and each reports the count it needs offloaded. Independently of any route budget, a provider-side request-size rejection (HTTP 413, classified `INVALID_REQUEST` with too-large wording) is treated as the same repairable condition: the plugin offloads half of the retained occurrences and retries, converging within logarithmically many attempts.
 
 ### Minimal configuration
 
@@ -39,7 +39,7 @@ Each decision appends one `image/offload` event identifying the selected occurre
 
 ### Failures and recovery
 
-The plugin acts only on `IMAGE_OFFLOAD_REQUIRED` failures that carry `offloadImages`. It walks the surface in model request order, skips assistant nodes and images already marked, and marks that many occurrences. When nothing remains to offload it delegates on the `agent/request-error` waterfall, so downstream recovery or the ordinary turn error applies. The retry spends no provider retry budget and logs no `llm/retry` event. Cancellation before recording a selection delegates without adding an `image/offload` event; cancellation after a committed selection stops retry but preserves the omission.
+The plugin acts on `IMAGE_OFFLOAD_REQUIRED` failures that carry `offloadImages`, and on `INVALID_REQUEST` failures whose message matches the request-too-large wording (an endpoint's byte cap sitting below the route's configured bounds). It walks the surface in model request order, skips assistant nodes and images already marked, and marks that many occurrences — the exact reported count for budget failures, half of the retained occurrences for size rejections. When nothing remains to offload it delegates on the `agent/request-error` waterfall, so downstream recovery or the ordinary turn error applies. The retry spends no provider retry budget and logs no `llm/retry` event. Cancellation before recording a selection delegates without adding an `image/offload` event; cancellation after a committed selection stops retry but preserves the omission.
 
 -----
 

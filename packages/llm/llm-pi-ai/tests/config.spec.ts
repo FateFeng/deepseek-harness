@@ -91,6 +91,9 @@ describe('request image policy bounds', () => {
     ['requestImagePixelBudget', Number.MAX_SAFE_INTEGER + 1, /requestImagePixelBudget must be a positive safe integer/],
     ['requestImageMaxBytes', 0, /requestImageMaxBytes must be a positive safe integer/],
     ['requestImageMaxBytes', 1.5, /requestImageMaxBytes must be a positive safe integer/],
+    ['maxRequestBytes', 0, /maxRequestBytes must be a positive safe integer/],
+    ['maxRequestBytes', -2, /maxRequestBytes must be a positive safe integer/],
+    ['maxRequestBytes', 1.5, /maxRequestBytes must be a positive safe integer/],
   ] as const)('rejects %s=%s at service resolution', (field, value, message) => {
     const programmatic = {
       providers: {

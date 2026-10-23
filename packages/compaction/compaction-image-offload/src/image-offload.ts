@@ -44,3 +44,26 @@ export function offloadOldestImages(session: Session, sourceEventSeqs: readonly 
   session.append('image/offload', { targets })
   return true
 }
+
+/**
+ * Count retained (not yet offloaded) input-image occurrences across the given
+ * surface nodes, in the same model-request order {@link offloadOldestImages} uses.
+ * @param session - session whose surface is inspected.
+ * @param sourceEventSeqs - input message events in request order.
+ * @returns how many occurrences a size-rejection retry could still offload.
+ */
+export function retainedImageCount(session: Session, sourceEventSeqs: readonly SessionSeq[]): number {
+  let retained = 0
+  for (const seq of sourceEventSeqs) {
+    // Existing Session history read; migration deferred. Current surface nodes index the durable log.
+    // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
+    const event = session.eventAt(seq)!
+    if (event.type !== 'user/message' && event.type !== 'tool/result') continue
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- both input node types produce a message
+    const message = session.deriveEventMessage(event)!
+    for (const block of message.content) {
+      if (block.type === 'image' && block.offloaded !== true) retained += 1
+    }
+  }
+  return retained
+}

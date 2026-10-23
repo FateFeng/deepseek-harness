@@ -7,6 +7,7 @@ import LlmRuntime, {
   HarnessError,
   isContextWindowExceededError,
   isQuotaExceededError,
+  isRequestTooLargeError,
   LlmAdapter,
   LlmError,
   ProviderRequestId,
@@ -130,6 +131,22 @@ describe('LlmRuntime', () => {
     expect(isContextWindowExceededError('invalid input: temperature exceeds maximum allowed value')).toBe(false)
     expect(isContextWindowExceededError('input exceeds maximum allowed value')).toBe(false)
     expect(isContextWindowExceededError('context window size must be positive')).toBe(false)
+  })
+
+  it('distinguishes transport request-size rejections from context overflow', () => {
+    for (const detail of [
+      '413 Request Entity Too Large',
+      'HTTP 413: Payload Too Large',
+      'Failed to buffer the request body: length limit exceeded',
+      'payload too large',
+      'request body too large',
+    ]) {
+      expect(isRequestTooLargeError(detail)).toBe(true)
+      expect(isContextWindowExceededError(detail)).toBe(false)
+    }
+    expect(isRequestTooLargeError('input is too long for this model')).toBe(false)
+    expect(isRequestTooLargeError('request too large for model context')).toBe(false)
+    expect(isRequestTooLargeError('invalid input: temperature exceeds maximum allowed value')).toBe(false)
   })
 
   it('distinguishes exhausted account quota from transient rate limiting', () => {
