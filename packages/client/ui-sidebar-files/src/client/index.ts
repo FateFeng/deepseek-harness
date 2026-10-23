@@ -33,10 +33,18 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Workspace directory actions after the file tree's reload control. */
     'sidebar.right.tab.files.actions': {
       kind: 'list'
-      scope: 'session'
+      scope: 'root'
       owner: {
-        /** Absolute directory path displayed by the file tree. */
+        /** Absolute directory path currently displayed by the file tree. */
         readonly absolutePath: string
+        /** Session cwd, which remains the canonical primary Workspace path. */
+        readonly workspacePath: string
+        /**
+         * Change this tab's tree root without changing its Session cwd.
+         * @param path - authorized absolute root.
+         * @returns after the previous tree closes and the replacement opens.
+         */
+        readonly onRootChange: (path: string) => Promise<void>
       }
     }
   }
@@ -86,7 +94,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     {
       name: 'sidebar.right.pane.tab', key: FILES_ID, locale: NS, store, inject,
-      children: { 'sidebar.right.tab.files.actions': { kind: 'list', scope: 'session' } },
+      children: { 'sidebar.right.tab.files.actions': { kind: 'list', scope: 'root' } },
     },
     FilesBody,
   )), 'ui-sidebar-files: files tab body')

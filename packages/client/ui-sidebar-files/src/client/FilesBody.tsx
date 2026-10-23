@@ -8,8 +8,8 @@
  * anything else is shown but refuses to open. The header uses the shared
  * PathLabel for the root, followed by reload and workspace directory actions.
  */
-import { useEffect, useLayoutEffect, useRef } from 'react'
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import type { DragEvent as ReactDragEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import type {
@@ -20,6 +20,8 @@ import {
   IconPauseOutlineRegular, IconPlayOutlineRegular, PathLabel,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
+import { FILE_REFERENCE_DRAG_TYPE, fileReferenceDragText, serializeFileReferenceDrag } from '@deepseek-ai/dsh-file-reference/grammar'
+import type { FileReferenceDragPayload } from '@deepseek-ai/dsh-file-reference/grammar'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { childPath } from './face.ts'
 import type { FilesInjected } from './face.ts'
@@ -50,6 +52,19 @@ export function orderEntries(entries: readonly WorkspaceDirectoryEntry[]): Works
     const group = Number(right.type === 'directory') - Number(left.type === 'directory')
     return group !== 0 ? group : byName.compare(left.name, right.name)
   })
+}
+
+/** Put one canonical tree path on the drag; the receiving Host rechecks authorization. */
+function beginReferenceDrag(event: ReactDragEvent<HTMLButtonElement>, payload: FileReferenceDragPayload): void {
+  const serialized = serializeFileReferenceDrag(payload)
+  const text = fileReferenceDragText(payload)
+  if (serialized === undefined || text === undefined) {
+    event.preventDefault()
+    return
+  }
+  event.dataTransfer.effectAllowed = 'copy'
+  event.dataTransfer.setData(FILE_REFERENCE_DRAG_TYPE, serialized)
+  event.dataTransfer.setData('text/plain', text)
 }
 
 /**
@@ -84,7 +99,9 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
     const expanded = tree.state.expanded.includes(path)
     return (
       <li className={css.item} data-files-entry="directory" data-files-path={path}>
-        <button type="button" className={css.row} aria-expanded={expanded} onClick={() => { tree.onToggle(parent, path) }}>
+        <button type="button" className={css.row} aria-expanded={expanded} draggable
+          onDragStart={(event) => { beginReferenceDrag(event, { path, kind: 'directory' }) }}
+          onClick={() => { tree.onToggle(parent, path) }}>
           {expanded ? <IconFolderOpenRegular className={css.icon} /> : <IconFolderCloseRegular className={css.icon} />}
           <span className={css.name}>{entry.name}</span>
         </button>
@@ -95,7 +112,9 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
   if (entry.type === 'file') {
     return (
       <li className={css.item} data-files-entry="file" data-files-path={path}>
-        <button type="button" className={css.row} onClick={() => { tree.onOpen(path) }}>
+        <button type="button" className={css.row} draggable
+          onDragStart={(event) => { beginReferenceDrag(event, { path, kind: 'file' }) }}
+          onClick={() => { tree.onOpen(path) }}>
           <FileTypeIcon kind={classifyFileType(entry.name)} size={16} className={css.fileIcon} />
           <span className={css.name}>{entry.name}</span>
         </button>
@@ -139,9 +158,10 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
 /** The file tree's body: the workspace root and whatever the reader has opened under it. */
 export function FilesBody({
   useTabInfo, sessionId, useSessions, useStore, actions,
-  start, refresh, setAutoRefresh, toggle, t, renderSlot,
+  start, changeRoot, refresh, setAutoRefresh, toggle, t, renderSlot,
 }: FilesBodyProps): ReactNode {
   const { tab } = useTabInfo()
+  const onRootChange = useCallback((root: string) => changeRoot(tab.id, root, tab.signal), [changeRoot, tab.id, tab.signal])
   useEffect(() => tab.actions.bindCommands({ refresh: () => { refresh(tab.id) } }), [tab.actions, tab.id, refresh])
   const { signal, actions: tabActions } = tab
   const cwd = useSessions(sessions => sessions.byId[sessionId]?.cwd)
@@ -158,7 +178,7 @@ export function FilesBody({
       body.scrollTop = state.scrollTop
       scrollTopRef.current = body.scrollTop
     }
-  }, [seeded])
+  }, [seeded, state?.root])
   // Scrolling only moves the ref; the store hears about it once, on unmount,
   // so a scroll neither re-renders the tree nor writes after the owner's
   // abort has forgotten the bucket.
@@ -216,6 +236,8 @@ export function FilesBody({
         </Tooltip>
         {renderSlot('sidebar.right.tab.files.actions', {
           absolutePath: state.root,
+          workspacePath: cwd,
+          onRootChange,
         })}
       </div>
       <div

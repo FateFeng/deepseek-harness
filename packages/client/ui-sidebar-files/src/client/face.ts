@@ -126,6 +126,14 @@ export interface FilesInjected {
    */
   readonly start: (tabId: TabId, root: string, signal: AbortSignal) => void
   /**
+   * Replace the open tree root after its previous watches have closed.
+   * @param tabId - the tab being drawn.
+   * @param root - absolute path of the new tree root.
+   * @param signal - the tab record's lifetime.
+   * @returns after the previous tree is closed and the new tree is opened.
+   */
+  readonly changeRoot: (tabId: TabId, root: string, signal: AbortSignal) => Promise<void>
+  /**
    * List one directory into the store.
    * @param tabId - the tab being drawn.
    * @param path - absolute directory path.
@@ -157,9 +165,20 @@ export function filesFace(
     sessionId: SessionId,
     actions: BoundActions<ReturnType<typeof createFilesStore>>,
   ): FilesInjected => {
-    /** Per tab, per absolute path: the listing generation a settlement must match; the latest request wins. */
+    type RootTree = {
+      readonly path: string
+      readonly epoch: number
+      readonly node: DirectoryNode
+      automatic: boolean
+      closing?: Promise<void>
+    }
+    type TabTree = { readonly signal: AbortSignal; root?: RootTree; request: number; transitioning: boolean }
+    /** Per tab and path, the latest listing that may publish. */
     const generations = new Map<TabId, Map<string, number>>()
-    const roots = new Map<TabId, DirectoryNode>()
+    const epochs = new Map<TabId, number>()
+    const trees = new Map<TabId, TabTree>()
+    let nextEpoch = 0
+    let nextRequest = 0
     const nextGeneration = (tabId: TabId, path: string): number => {
       const byPath = generations.get(tabId) ?? new Map<string, number>()
       generations.set(tabId, byPath)
@@ -167,45 +186,119 @@ export function filesFace(
       byPath.set(path, generation)
       return generation
     }
+    const closeTree = (root: RootTree): Promise<void> => {
+      root.closing ??= root.node.close()
+      return root.closing
+    }
     const load = async (tabId: TabId, path: string, signal: AbortSignal): Promise<DirLevel | undefined> => {
       if (signal.aborted) return
+      const tree = trees.get(tabId)
+      if (tree === undefined || tree.transitioning) return
+      const epoch = epochs.get(tabId)
+      if (epoch === undefined) return
       const generation = nextGeneration(tabId, path)
       actions.loading(tabId, path)
       return list(sessionId, path, signal).then((result) => {
-        // A newer listing of this level was asked for since, or the record is
-        // gone and its bookkeeping with it: nothing left for this one to write.
-        if (signal.aborted || generations.get(tabId)?.get(path) !== generation) return
+        // Both the root epoch and level generation must still be current.
+        if (signal.aborted || epochs.get(tabId) !== epoch || generations.get(tabId)?.get(path) !== generation) return
         if (result.ok) actions.loaded(tabId, path, result.value)
         else actions.failed(tabId, path, result.error)
         return result.ok ? result.value : undefined
       })
     }
+    const openTree = (tabId: TabId, tree: TabTree, path: string, automatic: boolean, epoch: number): RootTree => {
+      const bound: { root?: RootTree } = {}
+      const node = new DirectoryNode(path,
+        (childPath, lifetime) => load(tabId, childPath, lifetime),
+        (childPath, lifetime) => watch(sessionId, childPath, lifetime),
+        (childPath, error) => {
+          const root = bound.root
+          if (root === undefined || tree.signal.aborted || trees.get(tabId) !== tree
+            || tree.root !== root || epochs.get(tabId) !== epoch) return
+          actions.failed(tabId, childPath, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
+        }, tree.signal,
+      )
+      const root: RootTree = { path, epoch, node, automatic }
+      bound.root = root
+      node.setAutomatic(automatic)
+      return root
+    }
+    const changeRoot = async (tabId: TabId, path: string, signal: AbortSignal): Promise<void> => {
+      if (signal.aborted) return
+      const tree = trees.get(tabId)
+      const previous = tree?.root
+      if (tree === undefined || tree.signal !== signal || previous === undefined) return
+      if (!tree.transitioning && previous.path === path) return
+      const request = ++nextRequest
+      const epoch = ++nextEpoch
+      tree.request = request
+      tree.transitioning = true
+      epochs.set(tabId, epoch)
+      try {
+        await closeTree(previous)
+      } catch (error) {
+        if (!signal.aborted && trees.get(tabId) === tree && tree.request === request && tree.root === previous) {
+          const replacement = openTree(tabId, tree, previous.path, previous.automatic, epoch)
+          tree.root = replacement
+          tree.transitioning = false
+          generations.delete(tabId)
+          replacement.node.open()
+        }
+        throw error
+      }
+      if (signal.aborted || trees.get(tabId) !== tree || tree.request !== request || tree.root !== previous) return
+      const replacement = openTree(tabId, tree, path, previous.automatic, epoch)
+      tree.root = replacement
+      tree.transitioning = false
+      generations.delete(tabId)
+      actions.changeRoot(tabId, path)
+      replacement.node.open()
+    }
     return {
-      refresh: (tabId) => { void roots.get(tabId)?.refreshTree() },
+      refresh: (tabId) => { void trees.get(tabId)?.root?.node.refreshTree() },
       setAutoRefresh: (tabId, enabled) => {
         actions.autoRefresh(tabId, enabled)
-        roots.get(tabId)?.setAutomatic(enabled)
+        const tree = trees.get(tabId)
+        const root = tree?.root
+        if (tree === undefined || root === undefined) return
+        root.automatic = enabled
+        if (!tree.transitioning) root.node.setAutomatic(enabled)
       },
       start(tabId, root, signal) {
+        if (signal.aborted) return
+        const previous = trees.get(tabId)
+        if (previous !== undefined) {
+          previous.request = ++nextRequest
+          previous.transitioning = false
+          const previousRoot = previous.root
+          if (previousRoot !== undefined) void closeTree(previousRoot)
+        }
         actions.start(tabId, root)
+        generations.delete(tabId)
+        const tree: TabTree = { signal, request: ++nextRequest, transitioning: false }
+        const epoch = ++nextEpoch
+        const record = openTree(tabId, tree, root, true, epoch)
+        tree.root = record
+        trees.set(tabId, tree)
+        epochs.set(tabId, record.epoch)
         signal.addEventListener('abort', () => {
-          void roots.get(tabId)?.close()
-          roots.delete(tabId)
+          if (trees.get(tabId) !== tree) return
+          tree.request = ++nextRequest
+          tree.transitioning = false
+          trees.delete(tabId)
+          epochs.delete(tabId)
           generations.delete(tabId)
           actions.forget(tabId)
+          const root = tree.root
+          if (root !== undefined) void closeTree(root)
         }, { once: true })
-        roots.set(tabId, new DirectoryNode(root,
-          (path, lifetime) => load(tabId, path, lifetime),
-          (path, lifetime) => watch(sessionId, path, lifetime),
-          (path, error) => {
-            if (!signal.aborted) actions.failed(tabId, path, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
-          }, signal,
-        ).open())
+        record.node.open()
       },
+      changeRoot,
       load: (tabId, path, signal) => { void load(tabId, path, signal) },
       toggle(tabId, parentPath, path, expanded, signal) {
         if (signal.aborted) return
-        const root = roots.get(tabId)
+        const root = trees.get(tabId)?.root?.node
         if (root === undefined) return
         const parent = root.find(parentPath)
         if (parent === undefined && !expanded.includes(parentPath)) return

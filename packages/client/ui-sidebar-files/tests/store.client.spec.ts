@@ -89,6 +89,25 @@ describe('createFilesStore', () => {
     expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, levels: {}, expanded: [ROOT, child], scrollTop: 120, autoRefresh: false })
   })
 
+  it('changes the root and clears the old view while preserving the automatic setting', () => {
+    const store = createFilesStore().create()
+    const { actions } = store
+    const nextRoot = '/work/other'
+    const child = `${ROOT}/src`
+    actions.start(TAB, ROOT)
+    actions.loaded(TAB, ROOT, LEVEL)
+    actions.toggled(TAB, child)
+    actions.loaded(TAB, child, LEVEL)
+    actions.scrolled(TAB, 120)
+    actions.autoRefresh(TAB, false)
+
+    actions.changeRoot(TAB, nextRoot)
+
+    expect(store.getSnapshot().byTab[TAB]).toEqual({
+      root: nextRoot, levels: {}, expanded: [nextRoot], scrollTop: 0, autoRefresh: false,
+    })
+  })
+
   it('keeps the automatic setting independent for each tab', () => {
     const store = createFilesStore().create()
     const other = 'tab-2' as TabId
