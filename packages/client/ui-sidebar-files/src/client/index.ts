@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { FILES_ID, filesDefinition } from './definition.tsx'
-import { createList, createWatch, filesFace } from './face.ts'
+import { createList, createSearch, createWatch, filesFace } from './face.ts'
 import { FilesBody } from './FilesBody.tsx'
 import { FilesTitle } from './FilesTitle.tsx'
 import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
@@ -25,7 +25,7 @@ import { createFilesStore } from './store.ts'
 
 export type { SidebarFilesKey } from './locales.ts'
 export type { DirLevel, FilesState, FilesTabState, LevelState } from './store.ts'
-export type { FilesInjected, ListWorkspaceDirectory, WorkspaceFilesListRemote } from './face.ts'
+export type { FilesInjected, ListWorkspaceDirectory, SearchWorkspaceFiles, WorkspaceFilesListRemote } from './face.ts'
 export type { FilesBodyProps } from './FilesBody.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -39,11 +39,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         readonly absolutePath: string
         /** Session cwd, which remains the canonical primary Workspace path. */
         readonly workspacePath: string
-        /**
-         * Change this tab's tree root without changing its Session cwd.
-         * @param path - authorized absolute root.
-         * @returns after the previous tree closes and the replacement opens.
-         */
+        /** Change this tab's tree root without changing its Session cwd. @param path - authorized absolute root. @returns after the previous tree closes and the replacement opens. */
         readonly onRootChange: (path: string) => Promise<void>
       }
     }
@@ -90,7 +86,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-sidebar-files: dictionaries')
 
   const store = createFilesStore()
-  const inject = filesFace(createList(ctx.remote), createWatch(ctx.remote))
+  const inject = filesFace(createList(ctx.remote), createWatch(ctx.remote), createSearch(ctx.remote))
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     {
       name: 'sidebar.right.pane.tab', key: FILES_ID, locale: NS, store, inject,

@@ -8,8 +8,8 @@
  *   filesystem's execution world, because their consumer is the Client
  *   resource system, whose `dsh-resource://file/session/<id>/<path>` address carries that
  *   same path.
- * - `list` speaks workspace paths — the same syntax its `path` argument accepts —
- *   because its consumer is a tree rooted at the workspace root.
+ * - `list` and `search` speak workspace paths — the same syntax `list`'s `path`
+ *   argument accepts — because their consumer is a tree rooted at the workspace root.
  *
  * @module @deepseek-ai/dsh-api-workspace-files/types
  */
@@ -119,6 +119,36 @@ export interface WorkspaceDirectoryListing {
    */
   readonly entries: readonly WorkspaceDirectoryEntry[]
   /** Whether the entry cap dropped children from {@link entries}. */
+  readonly truncated: boolean
+}
+
+/** One workspace search: what text to find and where to look for it. */
+export interface WorkspaceFileSearchRequest {
+  /** What the query matches: basenames of regular files, or lines of file content. */
+  readonly mode: 'name' | 'content'
+  /** The text to find; matching is a case-insensitive substring test. */
+  readonly query: string
+}
+
+/** One search hit, addressed by workspace path in {@link WorkspaceDirectoryListing.path}'s vocabulary. */
+export interface WorkspaceFileSearchMatch {
+  /** Workspace-relative path of the hit, `/`-joined. */
+  readonly path: string
+  /** 1-based line of a content hit; absent for a name hit. */
+  readonly line?: number
+  /**
+   * The hit line's text for a content hit: trimmed, then cut to the protocol
+   * preview length, so the value is a prefix of the line, never the whole one.
+   * Absent for a name hit.
+   */
+  readonly preview?: string
+}
+
+/** The bounded outcome of one search. */
+export interface WorkspaceFileSearchResult {
+  /** Hits in walk order, cut to the configured result cap. */
+  readonly matches: readonly WorkspaceFileSearchMatch[]
+  /** Whether a configured cap ended the search early. */
   readonly truncated: boolean
 }
 

@@ -588,10 +588,10 @@ function SessionTree({
             ? undefined
             : {
               edit: () => {
-                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onEditRequest(group.workspaceId, group.label)
-              },
-              rename: () => {
+               /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                 if (group.workspaceId !== undefined) onEditRequest(group.workspaceId, group.label)
+               },
+               rename: () => {
               /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
                 if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
               },
@@ -1525,16 +1525,16 @@ export function WorkspaceBrowser({
                 home={home}
                 t={t}
                 onEditRequest={(workspaceId, displayTitle) => {
-                  setEditMode(true)
-                  setRenameTarget({
-                    workspaceId,
-                    storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,
-                  })
-                  setRenameDraft(displayTitle)
-                  setRenameError(null)
-                }}
-                onRenameRequest={(workspaceId, displayTitle) => {
-                  setEditMode(false)
+                   setEditMode(true)
+                   setRenameTarget({
+                     workspaceId,
+                     storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,
+                   })
+                   setRenameDraft(displayTitle)
+                   setRenameError(null)
+                 }}
+                 onRenameRequest={(workspaceId, displayTitle) => {
+                   setEditMode(false)
                   setRenameTarget({
                     workspaceId,
                     storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,

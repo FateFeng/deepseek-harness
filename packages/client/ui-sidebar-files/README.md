@@ -30,7 +30,7 @@ The `workspace.files` command opens or focuses the file page in the focused pane
 - **The body** — the keyed `sidebar.right.pane.tab` seat under that id: a header row under the strip, then the tree. The shared [`PathLabel`](../ui-primitives/README.md#component-catalog) displays the root path with subdued directories and a primary final segment. A clipped path retains its trailing characters with a left-edge fade; hovering reveals the full path. The reload control and the root-scoped `sidebar.right.tab.files.actions` list stay at its right, with the displayed root passed as `absolutePath` and canonical Session cwd as `workspacePath`; an action may also receive `onRootChange(path): Promise<void>` to replace this tab's root. The callback settles after the prior directory tree is closed and the replacement is installed; integrations must persist Host authorization before calling it, and it does not alter Session cwd. [`ui-open-in-app`](../ui-open-in-app/README.md) contributes the workspace directory opener.
 - **The chip title** — the keyed `sidebar.right.pane.tab.title` seat under that id: a shared `FileTypeIcon` folder glyph at 16px before the type's label. The tree's own rows never draw this sheet.
 
-Source files under `src/client/`: `definition.tsx` (the type), `store.ts` (what it keeps), `face.ts` (Remote reads and watches), `directory-node.ts` (open directories and their lifetimes), `FilesBody.tsx` (what it draws, with its ordering and failure-line helpers), `FilesTitle.tsx` (the chip title), `locales.ts` (what it says), and `index.ts` (the wiring).
+Source files under `src/client/`: `definition.tsx` (the type), `store.ts` (what it keeps), `face.ts` (Remote reads and watches), `directory-node.ts` (open directories and their lifetimes), `FilesBody.tsx` (what it draws, with its ordering and failure-line helpers), `FilesSearch.tsx` (the search box, its result list, and their pure helpers), `FilesTitle.tsx` (the chip title), `locales.ts` (what it says), and `index.ts` (the wiring).
 
 <a id="the-tree"></a>
 ## The tree
@@ -49,6 +49,11 @@ State lives in the type's own store, bucketed by tab id: `root`, `levels` (loadi
 
 Each open `DirectoryNode` owns its target watch for the Tab lifetime; collapse closes that node and its hidden descendants. Expansion changes during ancestor restoration update the store and pending nodes, so restored descendants follow the latest expansion preferences. Automatic refresh defaults to enabled; its separate toggle is hidden while state, labels, styles, and toggle logic remain. Changes received during a directory read or its completion remain pending for another refresh.
 
+<a id="search"></a>
+## Search
+
+The box under the header searches the whole session workspace, independent of the levels the tree has loaded. Name mode matches basenames by case-insensitive substring and shows hits fuzzy-ranked by name; content mode matches lines and groups hits per file with 1-based line numbers and a trimmed, length-capped preview. Both run bounded on the Host through `workspaceFiles.search` — configured directory names (`.git` and `node_modules` by default), binary files, and over-cap files are skipped, and a hit or scan cap marks the outcome truncated. Typing debounces 300ms; Enter opens the first hit, Escape clears back to the tree. A name hit opens the file; a content hit opens it at that line.
+
 <a id="model-experience"></a>
 ## Model Experience
 
@@ -61,7 +66,7 @@ None; directory listings travel over the Remote and assemble no model request.
 ## Known Limitations and Deferred Work
 
 <a id="known-limitations-and-deferred-work"></a>
-- **Listing only.** No search, artifact filter, drag-and-drop, rename, context menu, or current-file highlight.
+- **Listing and search only.** No artifact filter, drag-and-drop, rename, context menu, or current-file highlight. Search has no case or regex toggle, and its result list has no keyboard navigation.
 - **One root at a time.** This package displays only the active root and does not discover or merge additional roots. An integration must authorize any alternate roots and select them through the action's `onRootChange` callback.
 
 <a id="dev-note"></a>

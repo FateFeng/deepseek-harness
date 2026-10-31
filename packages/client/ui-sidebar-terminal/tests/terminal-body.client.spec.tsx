@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /** Terminal startup, title editing and xterm's screen lifetime. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { Mock } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { ITheme } from '@xterm/xterm'
+import type { ILink, ILinkProvider, ITheme } from '@xterm/xterm'
 import type { ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller/client'
@@ -34,6 +35,8 @@ class FakeTerminal {
   readonly dispose = vi.fn()
   readonly write = vi.fn((_data: string, callback: () => void) => { callback() })
   readonly loadAddon = vi.fn()
+  readonly registerLinkProvider: Mock<(provider: ILinkProvider) => { dispose: Mock<() => void> }> = vi.fn(() => ({ dispose: vi.fn() }))
+  readonly buffer = { active: { getLine: vi.fn((_y: number) => undefined as { translateToString(): string } | undefined) } }
   constructor(options: object) { this.options = options; fake.terminals.push(this) }
   open(node: HTMLElement) { node.appendChild(this.textarea!) }
   onData(input: (data: string) => void) { this.input = input; return { dispose: this.disposeInput } }
@@ -82,17 +85,18 @@ function mount(initial: TerminalViewState | undefined = idle, dictionary = en) {
     rename: vi.fn(async () => {}), connect: vi.fn(), write: vi.fn(), resize: vi.fn(), acknowledge: vi.fn(),
   }
   const openTab = vi.fn()
+  const openFile = vi.fn()
   const tab = () => ({ tab: { id: 'tab', title: 'Terminal', visible, actions: { openTab } } })
   // The test supplies the owner and model hooks consumed here; the remaining slot props are framework-owned.
   const props = {
     view: () => model,
     useTerminal: (_key: string, select?: (value: TerminalViewState | undefined) => unknown) => select === undefined ? state : select(state),
     useTheme: (select: (value: ThemeSnapshot) => unknown) => select(theme),
-    useTabInfo: tab, t: makeTranslate(dictionary),
+    useTabInfo: tab, openFile, t: makeTranslate(dictionary),
   } as unknown as TerminalBodyProps
   const view = render(<TerminalBody {...props} />)
   return {
-    view, props, model, detach, openTab,
+    view, props, model, detach, openTab, openFile,
     changeTheme(next: Partial<ThemeSnapshot> = {}) {
       theme = { ...theme, ...next, revision: theme.revision + 1 }
       view.rerender(<TerminalBody {...props} />)
@@ -392,6 +396,26 @@ it.each(titleSurfaces)('removes the native $name listener when its title unmount
   fireEvent.doubleClick(chip)
   expect(outer).toHaveBeenCalledOnce()
   expect(h.model.rename).not.toHaveBeenCalled()
+})
+
+it('links grep-style file references to the workspace file at the referenced line', () => {
+  const h = mount({ ...idle, info, phase: 'connected', writable: true })
+  const terminal = fake.terminals[0]!
+  const provider = terminal.registerLinkProvider.mock.calls[0]?.[0]
+  if (provider === undefined) throw new Error('no link provider was registered')
+  terminal.buffer.active.getLine.mockReturnValue({ translateToString: () => 'commonMain/ChatAgent.kt:12: suspend fun' })
+  let links: ILink[] | undefined
+  provider.provideLinks(1, (result) => { links = result })
+  expect(links).toHaveLength(1)
+  const link = links![0]!
+  expect(link.text).toBe('commonMain/ChatAgent.kt:12')
+  link.activate(new MouseEvent('click'), link.text)
+  expect(h.openFile).toHaveBeenCalledExactlyOnceWith('commonMain/ChatAgent.kt', { line: 12, cwd: '/workspace' })
+  const registration = terminal.registerLinkProvider.mock.results[0]
+  if (registration?.type !== 'return') throw new Error('expected a link-provider registration')
+  const disposeLinks = registration.value.dispose
+  h.view.unmount()
+  expect(disposeLinks).toHaveBeenCalledOnce()
 })
 
 it('starts a recovered screen with no local history when environment discovery is unavailable', () => {

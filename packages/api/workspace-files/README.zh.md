@@ -34,10 +34,11 @@ kind: "package-reference"
 | `readBytes(path, { range?, baseFile? })` | `WorkspaceFileBytes` = stat + `{ offset, data, eof }` | 以 `Uint8Array` 返回完整文件或有界字节范围；可从另一个文件所在目录解析目标 |
 | `list(path)` | `WorkspaceDirectoryListing { path, entries, truncated }` | 一个目录的直接子项 |
 | `changes(path)` | `WorkspaceFileWatchFrame` 流 | 订阅就绪确认，随后为单个文件或目录直接子项的失效通知 |
+| `search({ mode, query })` | `WorkspaceFileSearchResult { matches, truncated }` | 工作区内有界的文件名或内容子串搜索 |
 
 ### 寻址与路径
 
-`read`、`readBytes` 与 `stat` 接受绝对路径或相对于所选 Session 工作区根的路径。组合文件系统决定路径是否可读；本服务不额外要求文件读取限定于工作区。`readBytes` 携带 `options.baseFile` 时，从基准文件所在目录解析相对目标 `path`，基准文件或目标文件位于工作区外时同样适用。基准文件本身接受绝对路径或工作区相对路径。两个文件执行相同的普通文件检查；目标为空、绝对路径、URL 或含 NUL 时拒绝。文件结果报告文件系统执行环境中的绝对路径。`list` 仍限定于工作区，并以相对于该根的路径报告被列举目录。`changes` 使用相同的路径解析：文件监听沿用文件读取权限，目录监听仍限定于工作区。
+`read`、`readBytes` 与 `stat` 接受绝对路径或相对于所选 Session 工作区根的路径。组合文件系统决定路径是否可读；本服务不额外要求文件读取限定于工作区。`readBytes` 携带 `options.baseFile` 时，从基准文件所在目录解析相对目标 `path`，基准文件或目标文件位于工作区外时同样适用。基准文件本身接受绝对路径或工作区相对路径。两个文件执行相同的普通文件检查；目标为空、绝对路径、URL 或含 NUL 时拒绝。文件结果报告文件系统执行环境中的绝对路径。`list` 仍限定于工作区，并以相对于该根的路径报告被列举目录。`changes` 使用相同的路径解析：文件监听沿用文件读取权限，目录监听仍限定于工作区。`search` 不接收路径：它总是从工作区根出发，命中以 `list` 的工作区相对路径词汇返回。
 
 ### 分页
 
@@ -57,6 +58,10 @@ kind: "package-reference"
 
 `changes` 是 `stream` 模式的 Remote，只接受目标路径。Host 从 `stat` 取得实际目标类型；只要当前类型是目录，就要求位于工作区内，目标类型变化后也执行该检查。一代流先注册观察队列、解析目标并建立 `fs.watch`，然后产出 `{ kind: 'ready' }`。随后产出 `{ kind: 'change', change }`，其中 `change` 为当前 stat 元数据 `{ absolutePath, version }` 或 `{ absolutePath, absent: true }`。本地提供方使用 Chokidar，目录仅监听直接子项。匹配目标的 `fs/observed` 也触发失效。流在初始化期间排队变化。取消会独立于消费方拉取帧的进度关闭 watcher，流或插件拆除等待关闭完成。父目录保持存在时，缺失文件仍可监听同一路径的重建。
 
+### 搜索
+
+`search({ mode, query })` 在工作区内深度优先行走目录。`name` 模式按大小写不敏感的子串匹配普通文件的 basename，不读取内容；`content` 模式逐行匹配，命中返回 1 起始行号和经裁剪、限长（240 字符）的行预览。行走跳过配置的目录名（默认 `.git`、`node_modules`）、已访问过的目录身份（符号链接环）以及指向工作区外的符号链接目录；文件内容沿用 `read` 的读取权限。非 UTF-8 或含 NUL 的文件不产生命中。空查询或含 NUL 的查询是 `gateway/bad-request`。命中数、已检查条目数或单文件字节数达到配置上限时，搜索提前结束并把结果标记为 `truncated`。
+
 ### 配置
 
 | 字段 | 默认值 | 含义 |
@@ -65,6 +70,10 @@ kind: "package-reference"
 | `maxFileBytes` | `33554432`（32 MiB） | `readBytes` 未传 `range` 时的完整文件字节上限（含）；更大文件以 `too-large` 失败 |
 | `maxLines` | `5000` | 页大小的缺省值与上限（行）；更大的 `limit` 被拒绝 |
 | `maxEntries` | `2000` | 返回目录条目数上限；其余丢弃并报告截断 |
+| `maxSearchResults` | `200` | 返回搜索命中数上限；其余丢弃并报告截断 |
+| `maxSearchEntries` | `50000` | 一次搜索检查的条目数上限；超过即停止并报告截断 |
+| `maxSearchFileBytes` | `1048576`（1 MiB） | 单个文件被搜索内容的字节上限（含）；超出部分不搜索 |
+| `searchExcludedDirectories` | `['.git', 'node_modules']` | 搜索绝不进入的目录 basename |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-workspace-files)是每个可接受字段及其 JSDoc 的完备来源。
 

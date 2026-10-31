@@ -2,5 +2,9 @@
 - button "Reload"
 - button "Open in Finder"
 - button "More ways to open"
+- textbox "Search files"
+- group "Search scope":
+  - button "Name" [pressed]
+  - button "Content"
 - list:
   - listitem: Empty directory

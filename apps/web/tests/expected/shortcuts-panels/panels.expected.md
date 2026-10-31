@@ -21,5 +21,9 @@
   - button "Split" [disabled]
 - text: {{cwd}}/workspace
 - button "Reload"
+- textbox "Search files"
+- group "Search scope":
+  - button "Name" [pressed]
+  - button "Content"
 - list:
   - listitem: Empty directory

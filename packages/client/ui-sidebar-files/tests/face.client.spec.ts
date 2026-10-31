@@ -3,8 +3,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceDirectoryListing } from '@deepseek-ai/dsh-api-workspace-files/types'
-import { childPath, createList, filesFace } from '../src/client/face.ts'
-import type { WorkspaceFilesListRemote } from '../src/client/face.ts'
+import { childPath, createList, createSearch, filesFace } from '../src/client/face.ts'
+import type { SearchWorkspaceFiles, WorkspaceFilesListRemote } from '../src/client/face.ts'
 import { createFilesStore } from '../src/client/store.ts'
 import type { DirLevel } from '../src/client/store.ts'
 import { DirectoryNode } from '../src/client/directory-node.ts'
@@ -20,7 +20,8 @@ const LEVEL: DirLevel = { entries: [{ name: 'src', type: 'directory' }], truncat
 function mount() {
   const instance = createFilesStore().create()
   const script = scriptedList()
-  const face = filesFace(script.list, script.watch)(SESSION, instance.actions)
+  const search = vi.fn<SearchWorkspaceFiles>()
+  const face = filesFace(script.list, script.watch, search)(SESSION, instance.actions)
   const controller = new AbortController()
   onTestFinished(async () => {
     controller.abort()
@@ -369,7 +370,7 @@ describe('createList', () => {
     const list = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['list']>()
       .mockResolvedValue({ ok: true, value: listing })
     const signal = new AbortController().signal
-    const result = await createList({ workspaceFiles: { list } })(SESSION, `${ROOT}/src`, signal)
+    const result = await createList({ workspaceFiles: { list, search: vi.fn() } })(SESSION, `${ROOT}/src`, signal)
     expect(list).toHaveBeenCalledWith(SESSION, `${ROOT}/src`, signal)
     expect(result).toEqual({ ok: true, value: { entries: listing.entries, truncated: true } })
   })
@@ -378,7 +379,28 @@ describe('createList', () => {
     const error = new RemoteError('workspace-file/not-directory', 'file', { path: 'x', kind: 'file' })
     const list = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['list']>()
       .mockResolvedValue({ ok: false, error })
-    const result = await createList({ workspaceFiles: { list } })(SESSION, `${ROOT}/x`, new AbortController().signal)
+    const result = await createList({ workspaceFiles: { list, search: vi.fn() } })(SESSION, `${ROOT}/x`, new AbortController().signal)
+    expect(result).toEqual({ ok: false, error })
+  })
+})
+
+describe('createSearch', () => {
+  it('passes the session, the request, and the signal through', async () => {
+    const value = { matches: [{ path: 'src/a.ts', line: 2, preview: 'hit' }], truncated: true }
+    const search = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['search']>()
+      .mockResolvedValue({ ok: true, value })
+    const signal = new AbortController().signal
+    const request = { mode: 'content', query: 'hit' } as const
+    const result = await createSearch({ workspaceFiles: { list: vi.fn(), search } })(SESSION, request, signal)
+    expect(search).toHaveBeenCalledWith(SESSION, request, signal)
+    expect(result).toEqual({ ok: true, value })
+  })
+
+  it('returns a failure as the endpoint reported it', async () => {
+    const error = new RemoteError('gateway/internal', 'search failed', {})
+    const search = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['search']>()
+      .mockResolvedValue({ ok: false, error })
+    const result = await createSearch({ workspaceFiles: { list: vi.fn(), search } })(SESSION, { mode: 'name', query: 'x' }, new AbortController().signal)
     expect(result).toEqual({ ok: false, error })
   })
 })

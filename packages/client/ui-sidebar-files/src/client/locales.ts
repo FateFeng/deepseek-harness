@@ -37,6 +37,14 @@ export const zh = {
   'error.outsideWorkspace': '这个目录在工作区之外，侧栏不会读取它。',
   'error.notDirectory': '这不是一个目录。',
   'error.unavailable': '读取失败：{message}',
+  'search.placeholder': '搜索文件',
+  'search.mode': '搜索范围',
+  'search.mode.name': '文件名',
+  'search.mode.content': '内容',
+  'search.searching': '正在搜索…',
+  'search.empty': '没有匹配的结果。',
+  'search.truncated': '结果太多，只显示了一部分。',
+  'search.failed': '搜索失败：{message}',
 } satisfies Record<string, string>
 
 /** Files dictionary key union. */
@@ -61,6 +69,14 @@ export const en = {
   'error.outsideWorkspace': 'That directory is outside the workspace, so the sidebar will not read it.',
   'error.notDirectory': 'That is not a directory.',
   'error.unavailable': 'Read failed: {message}',
+  'search.placeholder': 'Search files',
+  'search.mode': 'Search scope',
+  'search.mode.name': 'Name',
+  'search.mode.content': 'Content',
+  'search.searching': 'Searching…',
+  'search.empty': 'No matching results.',
+  'search.truncated': 'Too many results, showing only some of them.',
+  'search.failed': 'Search failed: {message}',
 } satisfies Record<SidebarFilesKey, string>
 
 /** Japanese copy, checked against the English keys. */

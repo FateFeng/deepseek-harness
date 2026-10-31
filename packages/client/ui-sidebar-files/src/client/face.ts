@@ -23,7 +23,7 @@ import type { BoundActions } from '@deepseek-ai/dsh-client-store'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { DirLevel, createFilesStore } from './store.ts'
-import type { WorkspaceFileWatchFrame } from '@deepseek-ai/dsh-api-workspace-files/types'
+import type { WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileWatchFrame } from '@deepseek-ai/dsh-api-workspace-files/types'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { DirectoryNode } from './directory-node.ts'
 
@@ -80,10 +80,10 @@ export type ListWorkspaceDirectory = (
 
 /**
  * The slice of the Client Remote face this package calls: the `workspaceFiles`
- * namespace's `list`, exactly as the Host's generated client declares it.
+ * namespace's `list` and `search`, exactly as the Host's generated client declares them.
  */
 export type WorkspaceFilesListRemote = {
-  readonly workspaceFiles: Pick<ClientRemote['workspaceFiles'], 'list'>
+  readonly workspaceFiles: Pick<ClientRemote['workspaceFiles'], 'list' | 'search'>
 }
 
 /**
@@ -97,6 +97,27 @@ export function createList(remote: WorkspaceFilesListRemote): ListWorkspaceDirec
     if (!result.ok) return result
     return { ok: true, value: { entries: result.value.entries, truncated: result.value.truncated } }
   }
+}
+
+/**
+ * One workspace search, bound to a Remote face.
+ *
+ * The session travels with the call because the endpoint resolves the workspace
+ * root from it. A Remote call does not reject — the result carries the failure.
+ */
+export type SearchWorkspaceFiles = (
+  sessionId: SessionId,
+  request: WorkspaceFileSearchRequest,
+  signal: AbortSignal,
+) => Promise<RemoteResult<WorkspaceFileSearchResult>>
+
+/**
+ * Bind the search to one Remote face.
+ * @param remote - the Client Remote face carrying the `workspaceFiles` namespace.
+ * @returns the search the tab's search box performs.
+ */
+export function createSearch(remote: WorkspaceFilesListRemote): SearchWorkspaceFiles {
+  return (sessionId, request, signal) => remote.workspaceFiles.search(sessionId, request, signal)
 }
 
 /**
@@ -149,17 +170,26 @@ export interface FilesInjected {
    * @param signal - the tab record's lifetime.
    */
   readonly toggle: (tabId: TabId, parentPath: string, path: string, expanded: readonly string[], signal: AbortSignal) => void
+  /**
+   * Search the session workspace by file name or content, independent of the tree's loaded levels.
+   * @param request - the match mode and query text.
+   * @param signal - caller cancellation; a settlement after abort is dropped by the caller.
+   * @returns the bounded hits, or the failure.
+   */
+  readonly search: (request: WorkspaceFileSearchRequest, signal: AbortSignal) => Promise<RemoteResult<WorkspaceFileSearchResult>>
 }
 
 /**
- * Bind the tree's face to one directory listing.
+ * Bind the tree's face to one directory listing and one search.
  * @param list - the bound `workspaceFiles.list` call.
  * @param watch - target-scoped directory observation.
+ * @param search - the bound `workspaceFiles.search` call.
  * @returns the Slot `inject` factory: session and bound actions in, face out.
  */
 export function filesFace(
   list: ListWorkspaceDirectory,
   watch: WatchWorkspaceDirectory,
+  search: SearchWorkspaceFiles,
 ): (sessionId: SessionId, actions: BoundActions<ReturnType<typeof createFilesStore>>) => FilesInjected {
   return (
     sessionId: SessionId,
@@ -207,19 +237,16 @@ export function filesFace(
       })
     }
     const openTree = (tabId: TabId, tree: TabTree, path: string, automatic: boolean, epoch: number): RootTree => {
-      const bound: { root?: RootTree } = {}
+      let root!: RootTree
       const node = new DirectoryNode(path,
         (childPath, lifetime) => load(tabId, childPath, lifetime),
         (childPath, lifetime) => watch(sessionId, childPath, lifetime),
         (childPath, error) => {
-          const root = bound.root
-          if (root === undefined || tree.signal.aborted || trees.get(tabId) !== tree
-            || tree.root !== root || epochs.get(tabId) !== epoch) return
+          if (tree.signal.aborted || trees.get(tabId) !== tree || tree.root !== root || epochs.get(tabId) !== epoch) return
           actions.failed(tabId, childPath, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
         }, tree.signal,
       )
-      const root: RootTree = { path, epoch, node, automatic }
-      bound.root = root
+      root = { path, epoch, node, automatic }
       node.setAutomatic(automatic)
       return root
     }
@@ -296,6 +323,7 @@ export function filesFace(
       },
       changeRoot,
       load: (tabId, path, signal) => { void load(tabId, path, signal) },
+      search: (request, signal) => search(sessionId, request, signal),
       toggle(tabId, parentPath, path, expanded, signal) {
         if (signal.aborted) return
         const root = trees.get(tabId)?.root?.node

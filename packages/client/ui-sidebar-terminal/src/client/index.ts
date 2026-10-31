@@ -10,6 +10,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/client'
+import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
 import { PluginArtworkTerminal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { TerminalGuide, type TerminalGuideInjected } from './TerminalGuide.tsx'
 import { LazyTerminalBody } from './LazyTerminalBody.tsx'
@@ -20,7 +23,7 @@ import type { TerminalBodyInjected, TerminalInjected } from './face.ts'
 import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
 
 /** Services needed by the terminal's two sidebar seats. */
-export const inject = ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'webTerminals', 'theme', 'shortcuts']
+export const inject = ['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'webTerminals', 'theme', 'shortcuts', 'sessions']
 
 /**
  * Register the terminal type, observable views and background process cleanup.
@@ -36,8 +39,11 @@ export function apply(ctx: Context): void {
     sync()
     return () => { unsubscribe(); ctx.webTerminals.retainTabs([]) }
   }, 'ui-sidebar-terminal.window-holds')
-  const target = (sessionId: SessionId, key: string): SidebarRightTabParamsMap['terminal'] | undefined =>
-    ctx.sidebarRight.tabDomain.occurrence(sessionId, { id: key as TabId }).navigation.getSnapshot().params
+  const target = (sessionId: SessionId, key: string): SidebarRightTabParamsMap['terminal'] | undefined => {
+    // navigation.params carries every declared params entry; keep this kind's own.
+    const params = ctx.sidebarRight.tabDomain.occurrence(sessionId, { id: key as TabId }).navigation.getSnapshot().params
+    return params !== undefined && ('terminalId' in params || 'shellPath' in params) ? params : undefined
+  }
   const terminalId = (sessionId: SessionId, key: string): WebTerminalId | undefined => {
     const params = target(sessionId, key)
     return params !== undefined && 'terminalId' in params ? params.terminalId : undefined
@@ -78,6 +84,14 @@ export function apply(ctx: Context): void {
   const inject = (sessionId: SessionId): TerminalInjected => ({
     view: key => view(sessionId, key),
     keyedHooks: { terminal: key => view(sessionId, key).state },
+    // A relative path resolves against the terminal's own directory when the
+    // Host reported one, else against the Session workspace root.
+    openFile: (path, options) => {
+      const cwd = options?.cwd ?? ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+      const address = fileAddressFor(sessionId, cwd, path)
+      if (options?.line === undefined) ctx.sidebarRight.openResourceIn(sessionId, address)
+      else ctx.sidebarRight.openResourceIn(sessionId, address, { params: { line: options.line } })
+    },
   })
   const theme: TerminalBodyInjected['hooks']['theme'] = {
     getSnapshot: () => ctx.theme.getTheme(),
