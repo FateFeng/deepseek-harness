@@ -98,7 +98,6 @@ export class DraftEditorRuntime {
   private projected: EditorProjection = {
     detectText: '', clipboardText: '', occurrences: [], quotes: [], selection: null, caret: null, command: undefined,
   }
-  private projected: EditorProjection = { detectText: '', clipboardText: '', occurrences: [], selection: null, caret: null }
   /** Monotonic content revision for invalidating asynchronous Host checks after any intervening edit. */
   private draftRevision = 0
   /** Stable occurrence ids per chip NodeKey (undo restores keys, so ids survive it too). */
