@@ -85,8 +85,10 @@
   cursor: pointer;
 }
 
-.row:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .row:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 /* The folder glyph rides the tertiary ink, as the workspace tree's does (ui-workspace Rows `.slot`). */
@@ -114,8 +116,10 @@
   cursor: default;
 }
 
-.other:hover {
-  background: transparent;
+@media (hover: hover) {
+  .other:hover {
+    background: transparent;
+  }
 }
 
 .note {
@@ -161,14 +165,90 @@
   height: 15px;
 }
 
-.tool:hover {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .tool:hover {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .tool[aria-pressed='true'] {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The search row under the header: the box grows, the mode toggle keeps its size. */
+.searchBar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+/* The Input atom's wrapper is the row's one span; it grows, the toggle keeps its size. */
+.searchBar > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.searchModes {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.searchMode {
+  padding: 3px 8px;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+}
+
+.searchMode:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.searchMode[aria-pressed='true'] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The containing directory after a hit's basename, greyed and shrinkable. */
+.resultDir {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A content hit indents past the file row's icon: 10px row inset + 16px icon + 6px gap. */
+.resultMatch {
+  padding-left: 32px;
+}
+
+.resultLineNumber {
+  flex: 0 0 auto;
+  min-width: 28px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.resultPreview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* The folder sheet before the chip's text; the chip's title row centres it

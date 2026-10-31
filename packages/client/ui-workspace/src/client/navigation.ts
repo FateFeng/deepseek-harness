@@ -1,6 +1,7 @@
 /** Workspace archive and directory UI capability. */
 
 import { Service, type Context } from '@deepseek-ai/cordis'
+import type { AccessEffect, RemoteEndpoint } from '@deepseek-ai/dsh-api-remote-access/client'
 import type { ClientRemote, DirectoryListing, RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import type {
   ISessions,
@@ -33,6 +34,8 @@ interface MainSelection {
 export interface StartSessionOptions extends DraftInitializationOptions {
   /** Agent preset the Session runs; the Host default when omitted. */
   readonly agentPreset?: string
+  /** Create a new Session identity instead of adopting the Workspace's reusable blank. */
+  readonly fresh?: boolean
 }
 
 /** Workspace archive and directory operations consumed by Client UI domains. */
@@ -47,7 +50,9 @@ export interface UiWorkspace {
    * @param workspaceId - target Workspace.
    * @param beforeOpen - optional synchronous preparation for the selected Session,
    * skipped after supersession; a throw aborts the open and releases the retained reference.
-   * @param options - choices for the Session the connection creates or reuses.
+   * @param options - choices for the Session the connection creates or reuses;
+   * `fresh` creates a new identity instead of reusing the Workspace's blank Session,
+   * so the Host neither observes nor resumes prior Session state.
    * @returns completion; a superseded request may create a Session but does not open it.
    * @throws on failure; a refused creation is also shown through the Workspace
    * notice unless a later navigation or disposal superseded the request.
@@ -55,7 +60,7 @@ export interface UiWorkspace {
   openWorkspace(
     workspaceId: WorkspaceId,
     beforeOpen?: (sessionId: SessionId) => void,
-    options?: Pick<StartSessionOptions, 'agentPreset'>,
+    options?: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>,
   ): Promise<void>
   /**
    * Fork a Session without changing the current selection.
@@ -70,20 +75,24 @@ export interface UiWorkspace {
     options?: Pick<Parameters<ISessions['fork']>[0], 'allowMigration'>,
   ): Promise<SessionId>
   /**
-   * Resolve the Session for a new conversation in a Workspace: the Host reuses
-   * the first listed blank member while it is reusable and otherwise creates one,
-   * under the requested preset or the Host default.
+   * Resolve the Session for a new conversation in a Workspace: navigation names the first reusable
+   * blank member — listed in the Workspace, not archived, and listing no preset or the requested one —
+   * and the Host reuses it under the requested preset or its default, creating another Session when it
+   * reuses none. Concurrent calls for the same Workspace and preset share one attempt.
    * @param workspaceId - target Workspace.
    * @param options - choices for the created or reused Session.
    * @returns a Session already addressable through the Session Controller.
    */
-  connectWorkspace(workspaceId: WorkspaceId, options?: Pick<StartSessionOptions, 'agentPreset'>): Promise<SessionId>
+  connectWorkspace(workspaceId: WorkspaceId, options?: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>): Promise<SessionId>
   /**
-   * Create a fresh Session, or reuse a blank when preparing an explicit draft. A creation the Host
-   * refuses is shown through the Workspace notice and leaves the selection as it was.
+   * Open the Workspace blank `connectWorkspace` resolves, so New Session returns to that blank's
+   * unsent draft. A creation the Host refuses is shown through the Workspace notice and leaves the
+   * selection as it was.
    * @param workspaceId - explicit target; absent inherits the current or most recent Workspace.
-   * @param options - initial content and the reused blank's preset; existing text or attachments
-   * are preserved unless clearPreviousDraft is true.
+   * @param options - initial content, the blank's preset, and `whenDraftExists`, which decides
+   * whether existing text or attachments are kept, replaced, or followed by the prompt.
+   * `fresh` skips the Workspace's reusable blank Session and asks the Host to create
+   * a new identity.
    */
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void
   /**
@@ -129,6 +138,17 @@ export interface UiWorkspace {
    * @returns created absolute path.
    */
   createDirectory(path: string, name: string): Promise<string>
+  /**
+   * Keep `callback`'s effects installed while the current Peer may call
+   * `action` on one Workspace resource, with the semantics of
+   * `ctx.remoteAccess.whenAccess`: `useWorkspaceAccess` answers the same
+   * question during render.
+   * @param workspaceId - the Workspace resource the guarded effects depend on.
+   * @param action - endpoint action the guarded effects depend on.
+   * @param callback - creates one disposer or an iterable of disposers.
+   * @returns idempotent disposer owned by the caller's Cordis fiber.
+   */
+  whenAccess(workspaceId: WorkspaceId, action: RemoteEndpoint, callback: () => AccessEffect): () => void
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -160,6 +180,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
   private mainReference: SessionReference | undefined
+  private restorationNavigation: AbortSignal | undefined
 
   /**
    * @param ctx - Client root Context.
@@ -190,23 +211,26 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }, 'ui-workspace: Workspace navigation policy')
   }
 
-  connectWorkspace(workspaceId: WorkspaceId, options: Pick<StartSessionOptions, 'agentPreset'> = {}): Promise<SessionId> {
+  connectWorkspace(workspaceId: WorkspaceId, options: Pick<StartSessionOptions, 'agentPreset' | 'fresh'> = {}): Promise<SessionId> {
     return this.connectBlank(workspaceId, options)
   }
 
   /**
-   * @param reuse - preset for the reused or created blank; absent creates a fresh Session.
+   * @param reuse - preset for the reused or created blank.
    */
   private async connectBlank(
     workspaceId: WorkspaceId,
-    reuse: Pick<StartSessionOptions, 'agentPreset'> | undefined,
+    reuse: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>,
   ): Promise<SessionId> {
     const workspace = this.workspaces.list.getSnapshot().items
       .find(item => item.workspaceId === workspaceId)
     if (workspace === undefined) {
       throw new Error(`uiWorkspace.connectWorkspace: unknown workspace ${workspaceId}`)
     }
-    if (reuse === undefined) return this.sessions.create({ workspaceId })
+    if (reuse.fresh === true) {
+      // A forced-new request must never adopt an in-flight blank-reuse attempt.
+      return this.createInWorkspace(workspace, reuse)
+    }
     const inflight = this.connecting.get(workspaceId)
     if (inflight !== undefined && inflight.agentPreset === reuse.agentPreset) return inflight.attempt
 
@@ -217,13 +241,16 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     return attempt
   }
 
-  private createInWorkspace(workspace: WorkspaceView, options: Pick<StartSessionOptions, 'agentPreset'>): Promise<SessionId> {
+  /** Name the first reusable member blank; a requested preset also skips blanks listing another preset. */
+  private createInWorkspace(workspace: WorkspaceView, options: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>): Promise<SessionId> {
     const archived = this.workspaces.list.getSnapshot().archivedSessionIds
     const sessions = this.sessions.list.getSnapshot()
-    const blank = sessions.ids.find((id) => {
+    const blank = options.fresh === true ? undefined : sessions.ids.find((id) => {
       const summary = sessions.byId[id]
+      const listed = summary?.projectionValues?.agentPreset
       return summary !== undefined && summary.blank && summary.cwd === workspace.path
         && workspace.sessionIds.includes(id) && !archived.includes(id)
+        && (options.agentPreset === undefined || typeof listed !== 'string' || listed === options.agentPreset)
     })
     return this.createNamed({
       workspaceId: workspace.workspaceId,
@@ -280,7 +307,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   openWorkspace(
     workspaceId: WorkspaceId,
     beforeOpen?: (sessionId: SessionId) => void,
-    options: Pick<StartSessionOptions, 'agentPreset'> = {},
+    options: Pick<StartSessionOptions, 'agentPreset' | 'fresh'> = {},
   ): Promise<void> {
     return this.openWorkspaceSession(workspaceId, beforeOpen, options)
   }
@@ -288,7 +315,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private async openWorkspaceSession(
     workspaceId: WorkspaceId,
     beforeOpen: ((sessionId: SessionId) => void) | undefined,
-    reuse: Pick<StartSessionOptions, 'agentPreset'> | undefined,
+    reuse: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>,
   ): Promise<void> {
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
     let sessionId: SessionId
@@ -318,10 +345,10 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
-    const { agentPreset, ...draft } = options ?? {}
+    const { agentPreset, fresh, ...draft } = options ?? {}
     const draftOptions = options === undefined ? undefined : draft
-    const initializeDraft = draftOptions !== undefined
-      && (draftOptions.prompt !== undefined || draftOptions.clearPreviousDraft === true)
+    const initializeDraft = draftOptions !== undefined && (draftOptions.prompt !== undefined
+      || (draftOptions.whenDraftExists ?? (draftOptions.clearPreviousDraft === true ? 'replace' : 'keep')) === 'replace')
     const workspace = this.workspaces.list.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()
     const current = this.mainReference?.sessionId
@@ -340,13 +367,14 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       this.clearMain()
       return
     }
-    const opening = draftOptions === undefined
-      ? this.openWorkspaceSession(target, undefined, undefined)
-      : this.openWorkspace(target, initializeDraft ? (id) => {
-        const binding = this.sessions.binding(id)
-        if (binding === undefined) this.draftPreparationFailed()
-        this.prepareDraft(binding, draftOptions)
-      } : undefined, agentPreset === undefined ? {} : { agentPreset })
+    const opening = this.openWorkspace(target, initializeDraft ? (id) => {
+      const binding = this.sessions.binding(id)
+      if (binding === undefined) this.draftPreparationFailed()
+      this.prepareDraft(binding, draftOptions)
+    } : undefined, {
+      ...(agentPreset === undefined ? {} : { agentPreset }),
+      ...(fresh === undefined ? {} : { fresh }),
+    })
     void opening.catch(
       (reason: unknown) => { console.warn('new session failed:', reason) },
     )
@@ -405,12 +433,20 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     return result.value
   }
 
+  whenAccess(workspaceId: WorkspaceId, action: RemoteEndpoint, callback: () => AccessEffect): () => void {
+    // `ctx.get` traces the service to the caller's Context, which then owns the controller.
+    const access = this.ctx.get('remoteAccess')
+    /* v8 ignore next -- this plugin injects remoteAccess, so the service is active while uiWorkspace is reachable. */
+    if (access === undefined) throw new Error('ui-workspace: whenAccess requires the remoteAccess service')
+    return access.whenResourceAccess('workspace', workspaceId, action, callback)
+  }
+
   private watchNavigation(): () => void {
     let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
       if (this.clearArchivedCurrent()) return
-      if (initial !== 'waiting') return
+      if (initial !== 'waiting' || this.restorationNavigation?.aborted === true) return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
       if (workspace.phase !== 'ready' || sessions.phase !== 'ready') return
@@ -453,6 +489,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       return
     }
     const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+    this.restorationNavigation = navigation
     let sessionId: SessionId | undefined
     if (summary !== undefined && workspace !== undefined && summary.cwd === workspace.path
       && !workspaces.archivedSessionIds.includes(summary.id)) {

@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-浏览 Session 的工作区目录树，并在 Sidebar 预览中打开文件。根目录与已展开目录通过直接子项监听自动刷新，手动重新读取仍可用。该 tab 从引导页进入，不认领资源地址。
+浏览 Session 的工作区目录树，并在 Sidebar 预览中打开文件。初始根目录是 Session 的工作目录；Client 集成可以为单个 tab 提供替换根目录，而不改变 Session cwd。根目录与已展开目录通过直接子项监听自动刷新，手动重新读取仍可用。该 tab 从引导页进入，不认领资源地址。
 
 ## 目录
 
@@ -27,10 +27,10 @@ kind: "package-reference"
 命令 `workspace.files` 在焦点分栏内打开或聚焦文件页；从聊天区触发时使用当前会话的活动停靠分栏。文件页替换开始页，同一分栏内重复打开仍保留一个文件页。桌面默认键为 Mod+P。开始页入口显示有效快捷键；Windows 和 macOS Web 使用[快捷键服务的平台默认值](../shortcuts/README.zh.md)；Linux Web 默认不绑定此命令。
 
 - **类型**：`ctx.sidebarRightTabs.register(...)`，kind 为 `files`，id 为 `@deepseek-ai/dsh-client-ui-sidebar-files`，档位 `builtin`，没有 patterns，另有一个打开该类型的引导页入口（order 10，标题与描述取自 `sidebarFiles` 命名空间，图标为黄色文件夹）。
-- **正文**：以该 id 为键的 `sidebar.right.pane.tab` slot：strip 下的一行标题行，然后是树。共享的 [`PathLabel`](../ui-primitives/README.zh.md#component-catalog) 显示根路径，目录使用弱化颜色，最后一段使用主色。路径过长时保留尾部字符并在左侧渐隐；悬停显示完整路径。重新读取控件和 Session 作用域的 `sidebar.right.tab.files.actions` 列表位于右端，并通过 `absolutePath` 传入当前显示的根目录；[`ui-open-in-app`](../ui-open-in-app/README.zh.md) 在此提供工作区目录打开按钮。
+- **正文**：以该 id 为键的 `sidebar.right.pane.tab` slot：strip 下的一行标题行，然后是树。共享的 [`PathLabel`](../ui-primitives/README.zh.md#component-catalog) 显示根路径，目录使用弱化颜色，最后一段使用主色。路径过长时保留尾部字符并在左侧渐隐；悬停显示完整路径。重新读取控件和 root 作用域的 `sidebar.right.tab.files.actions` 列表位于右端，通过 `absolutePath` 传入当前显示的根目录、通过 `workspacePath` 传入规范的 Session cwd；action 还可接收 `onRootChange(path): Promise<void>` 替换当前 tab 的根目录。前一个目录树关闭且替换根已安装后该回调才会完成；集成方必须先持久化 Host 授权再调用它，且不会修改 Session cwd。 [`ui-open-in-app`](../ui-open-in-app/README.zh.md) 在此提供工作区目录打开按钮。
 - **标签页标题**：以该 id 为键的 `sidebar.right.pane.tab.title` slot：类型标签前的一枚 16px 共享 `FileTypeIcon` 文件夹图标。树本身的行不画这枚图标。
 
-`src/client/` 下的源文件：`definition.tsx`（类型是什么）、`store.ts`（它保存什么）、`face.ts`（Remote 读取与监听）、`directory-node.ts`（打开的目录及其生命周期）、`FilesBody.tsx`（它画什么，含排序与失败行两个辅助函数）、`FilesTitle.tsx`（标签页标题）、`locales.ts`（它说什么）、`index.ts`（接线）。
+`src/client/` 下的源文件：`definition.tsx`（类型是什么）、`store.ts`（它保存什么）、`face.ts`（Remote 读取与监听）、`directory-node.ts`（打开的目录及其生命周期）、`FilesBody.tsx`（它画什么，含排序与失败行两个辅助函数）、`FilesSearch.tsx`（搜索框、结果列表及其纯函数辅助）、`FilesTitle.tsx`（标签页标题）、`locales.ts`（它说什么）、`index.ts`（接线）。
 
 <a id="the-tree"></a>
 ## 树
@@ -49,6 +49,11 @@ kind: "package-reference"
 
 每个打开的 `DirectoryNode` 在 Tab 生命周期内持有自己的目标监听；折叠关闭该节点及其不可见后代。祖先恢复期间的展开状态变化会更新存储和待恢复节点，后代恢复时遵循最新展开偏好。自动刷新默认开启；独立开关暂时隐藏，状态、文案、样式与切换逻辑保留。目录读取期间或收尾时收到的变化仍会留待下一次刷新。
 
+<a id="search"></a>
+## 搜索
+
+标题行下方的搜索框在整个会话工作区内查找，与树已加载的层无关。「文件名」模式按大小写不敏感的子串匹配 basename，命中按名称模糊排序展示；「内容」模式逐行匹配，命中按文件分组，显示 1 起始的行号和截断后的行预览。两种模式都由 Host 的 `workspaceFiles.search` 有界执行——默认跳过 `.git`、`node_modules` 等配置目录、二进制文件与超上限文件，命中数或扫描量达上限时结果标记为截断。输入防抖 300ms；Enter 打开首个命中，Escape 清空并回到树。文件名命中打开文件；内容命中打开文件并定位到该行。
+
 <a id="model-experience"></a>
 ## 模型体验
 
@@ -61,8 +66,8 @@ kind: "package-reference"
 ## 已知限制与暂缓事项
 
 <a id="known-limitations-and-deferred-work"></a>
-- **只有列目录。**没有搜索、产物过滤、拖拽、重命名、右键菜单或当前文件高亮。
-- **只有一个根。**树以会话工作目录为根；没有办法浏览到它之上，而 Host 本来也拒绝工作区根之外的路径。
+- **只有列目录与搜索。**没有产物过滤、拖拽、重命名、右键菜单或当前文件高亮；搜索没有大小写或正则开关，结果列表没有键盘导航。
+- **同一时间只有一个根。**本包只显示当前根，不发现或合并其他根。集成方必须先授权任何替代根，再通过 action 的 `onRootChange` 回调选中它。
 
 <a id="dev-note"></a>
 ### 开发备注

@@ -12,6 +12,7 @@ import '@xterm/xterm/css/xterm.css'
 import css from './terminal.module.css'
 import { TerminalTheme } from './terminal-theme.ts'
 import { observeTerminalCursor } from './terminal-cursor.ts'
+import { registerTerminalFileLinks } from './terminal-links.ts'
 
 /** Standard sidebar owner share plus terminal model and localized copy. */
 export type TerminalBodyProps = PropsRuntime<'sidebar.right.pane.tab'> & PropsLocale<'sidebarTerminal'> & InjectFace<TerminalBodyInjected>
@@ -21,7 +22,7 @@ export type TerminalBodyProps = PropsRuntime<'sidebar.right.pane.tab'> & PropsLo
  * @param props - sidebar occurrence, model lookup and translated copy.
  * @returns the terminal screen and any pending or exceptional state.
  */
-export function TerminalBody({ useTabInfo, useTerminal, useTheme, view, t }: TerminalBodyProps): ReactNode {
+export function TerminalBody({ useTabInfo, useTerminal, useTheme, view, openFile, t }: TerminalBodyProps): ReactNode {
   const { tab } = useTabInfo()
   const theme = useTheme(value => value)
   const model = view(tab.id)
@@ -63,19 +64,20 @@ export function TerminalBody({ useTabInfo, useTerminal, useTheme, view, t }: Ter
           : <Button variant="outline" size="sm" onClick={() => { model.connect() }}>{t('reconnect')}</Button>)}
         {ended && newTerminal}
       </div>}
-      {state.info !== undefined && <TerminalScreen state={state} model={model} visible={tab.visible} label={t('title')} theme={theme} />}
+      {state.info !== undefined && <TerminalScreen state={state} model={model} visible={tab.visible} label={t('title')} theme={theme} openFile={openFile} />}
       {error !== undefined && <p className={css.error} role="alert">{t('failed', { message: error })}</p>}
     </section>
   )
 }
 
 /* oxlint-disable typescript/no-non-null-assertion -- React sets the DOM ref, then these effects initialize and use the emulator. */
-function TerminalScreen({ state, model, visible, label, theme }: {
+function TerminalScreen({ state, model, visible, label, theme, openFile }: {
   state: TerminalViewState
   model: TerminalView
   visible: boolean
   label: string
   theme: ThemeSnapshot
+  openFile: TerminalBodyInjected['openFile']
 }): ReactNode {
   const element = useRef<HTMLDivElement>(null)
   const terminal = useRef<Terminal>()
@@ -84,8 +86,8 @@ function TerminalScreen({ state, model, visible, label, theme }: {
   const lastRevision = useRef(0)
   const fontFamily = terminalFontFamily(theme.fontFamilies.terminal)
   const fontSize = theme.fontSizes.terminal
-  const current = useRef({ state, visible, fontFamily, fontSize })
-  current.current = { state, visible, fontFamily, fontSize }
+  const current = useRef({ state, visible, fontFamily, fontSize, openFile })
+  current.current = { state, visible, fontFamily, fontSize, openFile }
 
   useLayoutEffect(() => {
     const node = element.current!
@@ -99,6 +101,10 @@ function TerminalScreen({ state, model, visible, label, theme }: {
     const palette = new TerminalTheme(xterm)
     colors.current = palette
     const cursor = observeTerminalCursor(xterm, node, () => palette.cursor)
+    const links = registerTerminalFileLinks(xterm, {
+      openFile: (path, options) => { current.current.openFile(path, options) },
+      cwd: () => current.current.state.environment?.cwd,
+    })
     xterm.textarea?.setAttribute('aria-label', label)
     terminal.current = xterm
     fit.current = addon
@@ -114,6 +120,7 @@ function TerminalScreen({ state, model, visible, label, theme }: {
       observer.disconnect()
       input.dispose()
       cursor.dispose()
+      links.dispose()
       palette.dispose()
       xterm.dispose()
       terminal.current = undefined

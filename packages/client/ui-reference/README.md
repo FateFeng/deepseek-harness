@@ -25,7 +25,7 @@ Use `dsh-client-ui-reference` when Web users need to mention files, folders, or 
 <a id="use-this-package"></a>
 ## Use this package
 
-The source is active whenever the composition mounts this package and a Host `ctx.fileReferences` provider is available. Type `@` followed by an unquoted token to see files first, then sessions; open `@"…` to search files only. The candidate list is a completion menu, not a search result page: pick once and keep typing.
+The source is active whenever the composition mounts this package and a Host `ctx.fileReferences` provider is available. Type `@` followed by an unquoted token to see files first, then sessions; open `@"…` to search files only. The candidate list is a completion menu, not a search result page: pick once and keep typing. Desktop Hosts may expose attached source folders under the temporary `.dsh-sources/<folder>/` navigation prefix; drilling uses that query path, while a selected item keeps the Host-provided canonical path.
 
 ### What a pick inserts
 
@@ -57,7 +57,7 @@ Candidate requests require an existing retained Client Session and share one tem
 
 ### Serialization
 
-File picks preserve the natural text defined by the shared `@path` grammar as the hidden serialized and clipboard form. Session picks use the canonical `@[label](dsh-session:…)` mention; serialization never reconstructs identity from the visible title.
+File picks preserve the natural text defined by the shared `@path` grammar as the hidden serialized and clipboard form. When a Host supplies `referencePath`, the query-only path is used for drilling but the canonical path is inserted, so changing the file-browser root cannot reinterpret a selected file. Session picks use the canonical `@[label](dsh-session:…)` mention; serialization never reconstructs identity from the visible title.
 
 The plugin also registers file and folder matchers with [UserText](../ui-conversation/README.md#sent-user-text) and owns their `conversation.user.text.node` renderers. Each query returns the next complete reference at an original-text offset without file discovery; the shared evaluator resolves overlaps by source position. Interactive file nodes receive a Session-bound `openFile` injection; navigation failures keep the reference visible and offer a local retry/close dialog. Folder nodes remain labels.
 

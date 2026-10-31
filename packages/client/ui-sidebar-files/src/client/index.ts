@@ -17,15 +17,15 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { FILES_ID, filesDefinition } from './definition.tsx'
-import { createList, createWatch, filesFace } from './face.ts'
+import { createList, createSearch, createWatch, filesFace } from './face.ts'
 import { FilesBody } from './FilesBody.tsx'
 import { FilesTitle } from './FilesTitle.tsx'
-import { en, zh } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
 import { createFilesStore } from './store.ts'
 
 export type { SidebarFilesKey } from './locales.ts'
 export type { DirLevel, FilesState, FilesTabState, LevelState } from './store.ts'
-export type { FilesInjected, ListWorkspaceDirectory, WorkspaceFilesListRemote } from './face.ts'
+export type { FilesInjected, ListWorkspaceDirectory, SearchWorkspaceFiles, WorkspaceFilesListRemote } from './face.ts'
 export type { FilesBodyProps } from './FilesBody.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -33,10 +33,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Workspace directory actions after the file tree's reload control. */
     'sidebar.right.tab.files.actions': {
       kind: 'list'
-      scope: 'session'
+      scope: 'root'
       owner: {
-        /** Absolute directory path displayed by the file tree. */
+        /** Absolute directory path currently displayed by the file tree. */
         readonly absolutePath: string
+        /** Session cwd, which remains the canonical primary Workspace path. */
+        readonly workspacePath: string
+        /** Change this tab's tree root without changing its Session cwd. @param path - authorized absolute root. @returns after the previous tree closes and the replacement opens. */
+        readonly onRootChange: (path: string) => Promise<void>
       }
     }
   }
@@ -79,14 +83,14 @@ export function apply(ctx: ClientContext): void {
     }), 'ui-sidebar-files: shortcut')
   })
   ctx.effect(() => ctx.sidebarRightTabs.register(filesDefinition(t)), 'ui-sidebar-files: files type')
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-sidebar-files: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-sidebar-files: dictionaries')
 
   const store = createFilesStore()
-  const inject = filesFace(createList(ctx.remote), createWatch(ctx.remote))
+  const inject = filesFace(createList(ctx.remote), createWatch(ctx.remote), createSearch(ctx.remote))
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     {
       name: 'sidebar.right.pane.tab', key: FILES_ID, locale: NS, store, inject,
-      children: { 'sidebar.right.tab.files.actions': { kind: 'list', scope: 'session' } },
+      children: { 'sidebar.right.tab.files.actions': { kind: 'list', scope: 'root' } },
     },
     FilesBody,
   )), 'ui-sidebar-files: files tab body')

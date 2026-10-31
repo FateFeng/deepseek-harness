@@ -10,6 +10,7 @@ const CAPS = {
   maxFileBytes: 1024,
   maxLines: 100,
   maxEntries: 100,
+  maxSearchResults: 200, maxSearchEntries: 50000, maxSearchFileBytes: 1024 * 1024, searchExcludedDirectories: ['.git', 'node_modules'],
 }
 
 function header(id: SessionId, cwd?: string): SessionHeader {

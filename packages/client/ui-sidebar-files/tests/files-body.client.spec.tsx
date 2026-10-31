@@ -5,7 +5,9 @@ import { act, cleanup, fireEvent } from '@testing-library/react'
 import { makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
+import { FILE_REFERENCE_DRAG_TYPE } from '@deepseek-ai/dsh-file-reference/grammar'
 import { failureLine, orderEntries } from '../src/client/FilesBody.tsx'
+import type { FilesBodyProps } from '../src/client/FilesBody.tsx'
 import type { DirLevel } from '../src/client/store.ts'
 import { zh } from '../src/client/locales.ts'
 import { mountBody, ROOT, SESSION, TAB } from './mount.client.tsx'
@@ -39,6 +41,23 @@ describe('FilesBody', () => {
     const { view, script } = mountBody(null)
     expect(view.container.querySelector('[data-files-state="no-workspace"]')?.textContent).toBe(zh.noWorkspace)
     expect(script.list).not.toHaveBeenCalled()
+  })
+
+  it('passes the canonical Session cwd separately from the currently displayed file-tree root', async () => {
+    const owners: unknown[] = []
+    const renderSlot: FilesBodyProps['renderSlot'] = (name, owner) => {
+      if (name === 'sidebar.right.tab.files.actions') owners.push(owner)
+      return null
+    }
+    const { script } = mountBody(ROOT, undefined, renderSlot)
+    await act(() => script.watches.ready(ROOT))
+    await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+    const owner = owners.at(-1) as { absolutePath: string; workspacePath: string; onRootChange: (path: string) => Promise<void> }
+    expect(owner).toEqual({
+      absolutePath: ROOT,
+      workspacePath: ROOT,
+      onRootChange: expect.any(Function),
+    })
   })
 
   it('lists the root on mount, heads it with its path split at the last segment, and draws directories first with dotfiles kept', async () => {
@@ -156,6 +175,40 @@ describe('FilesBody', () => {
     const other = view.container.querySelector(`[data-files-path="${ROOT}/pipe"]`)!
     expect(other.querySelector('button')).toBeNull()
     expect(other.querySelector('[aria-disabled="true"]')?.getAttribute('title')).toBe(zh['entry.other'])
+  })
+
+  it('drags extensionless files and directories as canonical, typed workspace references', async () => {
+    const { view, script } = mountBody()
+    await act(() => script.watches.ready(ROOT))
+    await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+
+    const fileData = new Map<string, string>()
+    const fileTransfer = {
+      effectAllowed: 'none',
+      setData: vi.fn((type: string, value: string) => { fileData.set(type, value) }),
+    }
+    const file = view.container.querySelector<HTMLButtonElement>(`[data-files-path="${ROOT}/.env"] > button`)!
+    expect(file.draggable).toBe(true)
+    fireEvent.dragStart(file, { dataTransfer: fileTransfer })
+    expect(fileTransfer.effectAllowed).toBe('copy')
+    expect(fileData.get(FILE_REFERENCE_DRAG_TYPE)).toBe(JSON.stringify({
+      version: 1, path: `${ROOT}/.env`, kind: 'file',
+    }))
+    expect(fileData.get('text/plain')).toBe(`@${ROOT}/.env`)
+
+    const directoryData = new Map<string, string>()
+    const directoryTransfer = {
+      effectAllowed: 'none',
+      setData: vi.fn((type: string, value: string) => { directoryData.set(type, value) }),
+    }
+    const directory = view.container.querySelector<HTMLButtonElement>(`[data-files-path="${ROOT}/src"] > button`)!
+    expect(directory.draggable).toBe(true)
+    fireEvent.dragStart(directory, { dataTransfer: directoryTransfer })
+    expect(directoryData.get(FILE_REFERENCE_DRAG_TYPE)).toBe(JSON.stringify({
+      version: 1, path: `${ROOT}/src`, kind: 'directory',
+    }))
+    expect(directoryData.get('text/plain')).toBe(`@${ROOT}/src/`)
+    expect(view.container.querySelector(`[data-files-path="${ROOT}/pipe"] button`)).toBeNull()
   })
 
   it('marks a cut listing and an empty one', async () => {

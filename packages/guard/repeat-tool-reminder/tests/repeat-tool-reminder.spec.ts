@@ -1,9 +1,10 @@
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, ToolCallId  } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -299,7 +300,7 @@ describe('chain semantics', () => {
 
   it('ignores direct executes with no agent (they neither crash nor advance any chain)', async () => {
     const ctx = await harness({ thresholds: [2] })
-    const direct = await ctx.tools.execute({ signal: testToolSignal, callId: ToolCallId('d1'), name: 'probe', arguments: { q: 1 } })
+    const direct = await executeToolFixture(ctx, { signal: testToolSignal, callId: ToolCallId('d1'), name: 'probe', arguments: { q: 1 } })
     expect(direct.isError).toBe(false)
 
     ctx.llm.registerAdapter(['mock'], new MockAdapter([
@@ -405,5 +406,51 @@ describe('config validation fails loud', () => {
     await expect(ctx.plugin(RepeatToolGuard, { argumentsPreviewChars: 0 })).rejects.toThrow(/argumentsPreviewChars/)
     const ctx2 = await spine()
     await expect(ctx2.plugin(RepeatToolGuard, { argumentsPreviewChars: 12.5 })).rejects.toThrow(/argumentsPreviewChars/)
+  })
+
+  it('rejects invalid hard-stop settings', async () => {
+    const ctx = await spine()
+    await expect(ctx.plugin(RepeatToolGuard, { blockAt: 1 })).rejects.toThrow(/blockAt/)
+    const ctx2 = await spine()
+    await expect(ctx2.plugin(RepeatToolGuard, { maxTrackedCallsPerTurn: 1.5 })).rejects.toThrow(/maxTrackedCallsPerTurn/)
+  })
+})
+
+describe('hard loop boundaries', () => {
+  it('denies the next exact repeat before execution when blockAt is reached', async () => {
+    const ctx = await harness({ blockAt: 3 })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 'same' }),
+      toolCallResponse('c2', 'probe', { q: 'same' }),
+      toolCallResponse('c3', 'probe', { q: 'same' }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    const results = agent.session.snapshotEvents().filter((e): e is SessionEvent<'tool/result'> => e.type === 'tool/result')
+    expect(results).toHaveLength(3)
+    expect(results[2]!.data.message.isError).toBe(true)
+    expect(results[2]!.data.message.content).toEqual([{ type: 'text', text: expect.stringContaining('blocked exact repeat') }])
+  })
+
+  it('denies tracked calls after the per-user-turn budget', async () => {
+    const ctx = await harness({ maxTrackedCallsPerTurn: 2 })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'probe', { q: 1 }),
+      toolCallResponse('c2', 'other', { q: 2 }),
+      textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    const results = agent.session.snapshotEvents().filter((e): e is SessionEvent<'tool/result'> => e.type === 'tool/result')
+    expect(results).toHaveLength(2)
+    expect(results[1]!.data.message.isError).toBe(true)
+    expect(results[1]!.data.message.content).toEqual([{ type: 'text', text: expect.stringContaining('blocked after 2 tracked calls') }])
   })
 })

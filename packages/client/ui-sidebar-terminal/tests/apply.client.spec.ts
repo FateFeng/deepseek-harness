@@ -18,7 +18,7 @@ import { TerminalGuide, type TerminalGuideInjected } from '../src/client/Termina
 import { LazyTerminalBody } from '../src/client/LazyTerminalBody.tsx'
 import { TerminalTitle } from '../src/client/TerminalTitle.tsx'
 import type { TerminalBodyInjected } from '../src/client/face.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en, ja, zh, es, fr, de, ru, pt } from '../src/client/locales.ts'
 
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }))
 const SHORTCUT_CATALOG: readonly never[] = []
@@ -53,13 +53,14 @@ async function mountPlugin() {
   const openTabIn = vi.fn()
   const tabsIn = vi.fn(() => [] as { id: string; kind: string }[])
   const openTabs = createSnapshotStore<readonly SidebarRightOpenTab[]>([])
-  const commandTarget = vi.fn(), openTabFromTarget = vi.fn()
+  const commandTarget = vi.fn(), openTabFromTarget = vi.fn(), openResourceIn = vi.fn()
   const commands: ShortcutCommand[] = []
   ctx.provide('webTerminals', terminals as never)
   ctx.provide('sidebarRight', {
-    tabDomain: { occurrence }, openTabIn, tabsIn, openTabs, commandTarget, openTabFromTarget,
+    tabDomain: { occurrence }, openTabIn, tabsIn, openTabs, commandTarget, openTabFromTarget, openResourceIn,
     registerCloseHandler: (kind: string, handler: SidebarRightCloseHandler) => { expect(kind).toBe('terminal'); closeHandler = handler; return () => { closeHandler = undefined } },
   } as never)
+  ctx.provide('sessions', { list: { getSnapshot: () => ({ byId: { session: { cwd: '/session/root' } } }) } } as never)
   ctx.provide('slots', {
     inject: (_name: string, register: () => () => void) => register(),
     register: (options: Omit<typeof entries[number], 'component'>, component: unknown) => { const entry = { ...options, component }; entries.push(entry); return () => { entries.splice(entries.indexOf(entry), 1) } },
@@ -77,7 +78,7 @@ async function mountPlugin() {
   const fiber = await ctx.plugin({ inject, apply })
   return {
     tabs, entries, dictionaries, terminals, model, occurrence, openTabIn, tabsIn, openTabs, theme,
-    commandTarget, openTabFromTarget, commands,
+    commandTarget, openTabFromTarget, openResourceIn, commands,
     emitTheme() { ctx.emit('theme/change', theme) },
     get closeHandler() { return closeHandler },
     setParams(next: typeof params) { params = next },
@@ -97,7 +98,7 @@ it('registers terminal views without recovery or cleanup slots, then releases co
     expect(renderToStaticMarkup(createElement(Icon, { size: 22 }))).toContain('width="22"')
     expect(renderToStaticMarkup(createElement(Icon))).toContain('width="36"')
     expect(definition.multiple).toBe(true)
-    expect(h.dictionaries.get('sidebarTerminal')).toEqual({ en, zh })
+    expect(h.dictionaries.get('sidebarTerminal')).toEqual({ en, zh, ja, es, fr, de, ru, pt })
     expect(h.entries.map(entry => [entry.name, entry.component, entry.locale])).toEqual([
       ['sidebar.right.tab.guide.entry', TerminalGuide, 'sidebarTerminal'],
       ['sidebar.right.pane.tab', LazyTerminalBody, 'sidebarTerminal'],
@@ -130,6 +131,13 @@ it('registers terminal views without recovery or cleanup slots, then releases co
     expect(face.keyedHooks.terminal('tab')).toBe(h.model.state)
     expect(h.terminals.view).toHaveBeenLastCalledWith(sessionId, 'tab', 'sidebar://terminal/content', terminalId, undefined)
     expect(h.occurrence).toHaveBeenLastCalledWith(sessionId, { id: 'tab' })
+    face.openFile('docs/a.md', { line: 7, cwd: '/term/cwd' })
+    expect(h.openResourceIn).toHaveBeenLastCalledWith('session', 'dsh-resource://file/session/session/docs/a.md', { params: { line: 7 } })
+    face.openFile('/term/cwd/docs/b.md', { line: 3 })
+    expect(h.openResourceIn).toHaveBeenLastCalledWith('session', 'dsh-resource://file/session/session//term/cwd/docs/b.md', { params: { line: 3 } })
+    face.openFile('docs/c.md')
+    expect(h.openResourceIn).toHaveBeenLastCalledWith('session', 'dsh-resource://file/session/session/docs/c.md')
+    expect(h.openResourceIn).toHaveBeenCalledTimes(3)
     if (h.closeHandler === undefined) throw new Error('Terminal close handler was not registered')
     h.closeHandler(sessionId, { id: 'tab', contentId: 'sidebar://terminal/content' } as Parameters<SidebarRightCloseHandler>[1])
     expect(h.terminals.close).toHaveBeenLastCalledWith(sessionId, 'tab', 'sidebar://terminal/content', terminalId)
@@ -152,6 +160,7 @@ it('opens a terminal for the command target and refuses without a selected Sessi
   const h = await mountPlugin()
   try {
     const command = h.commands[0]!
+    expect(command.label()).toBe('new')
     const input = { region: 'page', modal: null, target: null } as const
     expect(command.resolve(input)).toEqual({ status: 'blocked', reason: 'shortcut.noSession' })
     const target = { sessionId: 'terminal-session' }

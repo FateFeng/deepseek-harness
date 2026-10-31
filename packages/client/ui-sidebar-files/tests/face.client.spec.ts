@@ -3,8 +3,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceDirectoryListing } from '@deepseek-ai/dsh-api-workspace-files/types'
-import { childPath, createList, filesFace } from '../src/client/face.ts'
-import type { WorkspaceFilesListRemote } from '../src/client/face.ts'
+import { childPath, createList, createSearch, filesFace } from '../src/client/face.ts'
+import type { SearchWorkspaceFiles, WorkspaceFilesListRemote } from '../src/client/face.ts'
 import { createFilesStore } from '../src/client/store.ts'
 import type { DirLevel } from '../src/client/store.ts'
 import { DirectoryNode } from '../src/client/directory-node.ts'
@@ -20,7 +20,8 @@ const LEVEL: DirLevel = { entries: [{ name: 'src', type: 'directory' }], truncat
 function mount() {
   const instance = createFilesStore().create()
   const script = scriptedList()
-  const face = filesFace(script.list, script.watch)(SESSION, instance.actions)
+  const search = vi.fn<SearchWorkspaceFiles>()
+  const face = filesFace(script.list, script.watch, search)(SESSION, instance.actions)
   const controller = new AbortController()
   onTestFinished(async () => {
     controller.abort()
@@ -279,6 +280,84 @@ describe('filesFace', () => {
     expect(watches.opened.map(stream => stream.path)).toEqual([ROOT, child])
     expect(watches.opened.every(stream => !stream.signal.aborted)).toBe(true)
   })
+
+  it('waits for the old root watch to release before opening the next root', async () => {
+    const h = mount()
+    h.face.start(TAB, ROOT, h.controller.signal)
+    const oldRoot = await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+    const release = oldRoot.holdRelease()
+
+    let completed = false
+    const change = h.face.changeRoot(TAB, '/work/other', h.controller.signal).then(() => { completed = true })
+    await oldRoot.releasing.promise
+    expect(h.watches.opened.map(watch => watch.path)).toEqual([ROOT])
+    expect(completed).toBe(false)
+
+    release.resolve(undefined)
+    await change
+    expect(h.watches.opened.map(watch => watch.path)).toEqual([ROOT, '/work/other'])
+    expect(h.snapshot()?.root).toBe('/work/other')
+  })
+
+  it('installs only the latest root requested while the old watch is closing', async () => {
+    const h = mount()
+    h.face.start(TAB, ROOT, h.controller.signal)
+    const oldRoot = await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+    const release = oldRoot.holdRelease()
+
+    const first = h.face.changeRoot(TAB, '/work/first', h.controller.signal)
+    await oldRoot.releasing.promise
+    const latest = h.face.changeRoot(TAB, '/work/latest', h.controller.signal)
+    release.resolve(undefined)
+    await Promise.all([first, latest])
+
+    expect(h.watches.opened.map(watch => watch.path)).toEqual([ROOT, '/work/latest'])
+    expect(h.snapshot()?.root).toBe('/work/latest')
+  })
+
+  it('does not reopen a root when the tab aborts during watch release', async () => {
+    const h = mount()
+    h.face.start(TAB, ROOT, h.controller.signal)
+    const oldRoot = await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+    const release = oldRoot.holdRelease()
+
+    const change = h.face.changeRoot(TAB, '/work/other', h.controller.signal)
+    await oldRoot.releasing.promise
+    h.controller.abort()
+    release.resolve(undefined)
+    await change
+
+    expect(h.watches.opened.map(watch => watch.path)).toEqual([ROOT])
+    expect(h.snapshot()).toBeUndefined()
+  })
+
+  it('rejects an old listing after an A-to-B-to-A root change', async () => {
+    const h = mount()
+    const stalePath = `${ROOT}/late`
+    h.face.start(TAB, ROOT, h.controller.signal)
+    await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+
+    h.face.load(TAB, stalePath, h.controller.signal)
+    await h.waitForList(1)
+    await h.face.changeRoot(TAB, '/work/other', h.controller.signal)
+    await h.watches.ready('/work/other')
+    await h.settleLatest({ ok: true, value: LEVEL })
+    await h.face.changeRoot(TAB, ROOT, h.controller.signal)
+    await h.watches.ready(ROOT, 1)
+    await h.settleLatest({ ok: true, value: LEVEL })
+
+    h.face.load(TAB, stalePath, h.controller.signal)
+    await h.waitForList(4)
+    const fresh: DirLevel = { entries: [{ name: 'fresh.txt', type: 'file' }], truncated: false }
+    await h.settleLatest({ ok: true, value: fresh })
+    await h.settle({ ok: true, value: { entries: [{ name: 'stale.txt', type: 'file' }], truncated: false } })
+
+    expect(h.snapshot()?.levels[stalePath]).toEqual({ kind: 'ready', level: fresh })
+  })
 })
 
 describe('createList', () => {
@@ -291,7 +370,7 @@ describe('createList', () => {
     const list = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['list']>()
       .mockResolvedValue({ ok: true, value: listing })
     const signal = new AbortController().signal
-    const result = await createList({ workspaceFiles: { list } })(SESSION, `${ROOT}/src`, signal)
+    const result = await createList({ workspaceFiles: { list, search: vi.fn() } })(SESSION, `${ROOT}/src`, signal)
     expect(list).toHaveBeenCalledWith(SESSION, `${ROOT}/src`, signal)
     expect(result).toEqual({ ok: true, value: { entries: listing.entries, truncated: true } })
   })
@@ -300,7 +379,28 @@ describe('createList', () => {
     const error = new RemoteError('workspace-file/not-directory', 'file', { path: 'x', kind: 'file' })
     const list = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['list']>()
       .mockResolvedValue({ ok: false, error })
-    const result = await createList({ workspaceFiles: { list } })(SESSION, `${ROOT}/x`, new AbortController().signal)
+    const result = await createList({ workspaceFiles: { list, search: vi.fn() } })(SESSION, `${ROOT}/x`, new AbortController().signal)
+    expect(result).toEqual({ ok: false, error })
+  })
+})
+
+describe('createSearch', () => {
+  it('passes the session, the request, and the signal through', async () => {
+    const value = { matches: [{ path: 'src/a.ts', line: 2, preview: 'hit' }], truncated: true }
+    const search = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['search']>()
+      .mockResolvedValue({ ok: true, value })
+    const signal = new AbortController().signal
+    const request = { mode: 'content', query: 'hit' } as const
+    const result = await createSearch({ workspaceFiles: { list: vi.fn(), search } })(SESSION, request, signal)
+    expect(search).toHaveBeenCalledWith(SESSION, request, signal)
+    expect(result).toEqual({ ok: true, value })
+  })
+
+  it('returns a failure as the endpoint reported it', async () => {
+    const error = new RemoteError('gateway/internal', 'search failed', {})
+    const search = vi.fn<WorkspaceFilesListRemote['workspaceFiles']['search']>()
+      .mockResolvedValue({ ok: false, error })
+    const result = await createSearch({ workspaceFiles: { list: vi.fn(), search } })(SESSION, { mode: 'name', query: 'x' }, new AbortController().signal)
     expect(result).toEqual({ ok: false, error })
   })
 })

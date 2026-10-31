@@ -1,14 +1,14 @@
 /**
  * Workspace file service: read-only file previews, workspace directory
- * listings, and the filesystem-observation change feed, exposed as
- * `workspaceFiles`.
+ * listings, bounded name/content searches, and the filesystem-observation
+ * change feed, exposed as `workspaceFiles`.
  *
  * File reads follow the composed filesystem's read access, including paths
  * outside the workspace. The selected Session header supplies the base for
  * relative paths, with the sandbox policy root as its no-cwd fallback, not a
- * read-containment restriction. Directory listings and change observations
- * remain workspace-scoped. File-kind checks and configured read caps apply to
- * every preview; this service exposes no mutations.
+ * read-containment restriction. Directory listings, change observations, and
+ * searches remain workspace-scoped. File-kind checks and configured read caps
+ * apply to every preview; this service exposes no mutations.
  *
  * A page is cut from `streamText`, which decodes and rejects non-UTF-8 as it
  * goes, so the file is read only up to the first character past the page and
@@ -37,6 +37,9 @@ import type {
   WorkspaceDirectoryListing,
   WorkspaceFileBytes,
   WorkspaceFileRange,
+  WorkspaceFileSearchMatch,
+  WorkspaceFileSearchRequest,
+  WorkspaceFileSearchResult,
   WorkspaceFileStat,
   WorkspaceFileText,
   WorkspaceFileWatchFrame,
@@ -82,6 +85,14 @@ export interface Config {
   readonly maxLines: number
   /** Cap on returned directory entries; the rest is dropped and reported cut. */
   readonly maxEntries: number
+  /** Cap on returned search hits; the rest is dropped and reported cut. */
+  readonly maxSearchResults: number
+  /** Cap on entries one search inspects; past it the search stops and reports cut. */
+  readonly maxSearchEntries: number
+  /** Inclusive byte cap on one file's searched content; the rest of the file is not searched. */
+  readonly maxSearchFileBytes: number
+  /** Directory basenames a search never descends into. */
+  readonly searchExcludedDirectories: string[]
 }
 
 /** One page cut from a decoded text stream. */
@@ -94,6 +105,18 @@ interface Page {
 
 /** The byte text never carries: its presence marks a page as binary. */
 const NUL = String.fromCharCode(0)
+
+/** Protocol-fixed length of a content hit's preview: the trimmed line's first characters. */
+const SEARCH_PREVIEW_LENGTH = 240
+
+/** Mutable accumulators of one bounded `search` walk. */
+interface SearchState {
+  readonly matches: WorkspaceFileSearchMatch[]
+  /** Entries inspected so far, files and directories alike. */
+  entries: number
+  /** Set when a configured cap ended the search early. */
+  truncated: boolean
+}
 
 /** Refuse anything the wire schema admits as a number but a window cannot use: only safe integers index a file. */
 function integerAtLeast(value: number, min: number, name: string): number {
@@ -188,6 +211,10 @@ export class WorkspaceFiles extends TypertRemoteService {
     maxFileBytes: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER - 1).default(32 * 1024 * 1024),
     maxLines: z.number().step(1).min(1).default(5000),
     maxEntries: z.number().step(1).min(1).default(2000),
+    maxSearchResults: z.number().step(1).min(1).default(200),
+    maxSearchEntries: z.number().step(1).min(1).default(50_000),
+    maxSearchFileBytes: z.number().step(1).min(1).default(1024 * 1024),
+    searchExcludedDirectories: z.array(z.string()).default(['.git', 'node_modules']),
   })
 
   private readonly feed: WorkspaceChangeFeed
@@ -340,6 +367,115 @@ export class WorkspaceFiles extends TypertRemoteService {
   @Remote({ mode: 'stream' })
   changes(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame> {
     return this.feed.follow(workspaceFileScope.workspaceRoot, path, signal)
+  }
+
+  /**
+   * Find file basenames or content lines matching the query, inside the workspace only.
+   *
+   * The walk descends depth-first from the workspace root, skipping configured
+   * directory names and already-visited directory identities; a symlinked
+   * directory that leaves the workspace is not followed, while a file's content
+   * keeps `read`'s authority. Content search reads at most the configured
+   * per-file byte cap and skips files whose text decode fails or carries NUL
+   * bytes. All caps end the search early and mark the result truncated.
+   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
+   * @param request - the match mode and query text.
+   * @param signal - caller cancellation.
+   * @returns the hits in walk order, bounded by the configured caps.
+   */
+  @Remote
+  async search(
+    workspaceFileScope: WorkspaceFileScope,
+    request: WorkspaceFileSearchRequest,
+    signal: AbortSignal,
+  ): Promise<WorkspaceFileSearchResult> {
+    if (request.query.trim().length === 0 || request.query.includes(NUL)) {
+      throw new RemoteError('gateway/bad-request', 'query must be non-empty text', {})
+    }
+    const root = await this.ctx.fs.resolve(workspaceFileScope.workspaceRoot, { signal })
+    const state: SearchState = { matches: [], entries: 0, truncated: false }
+    const visited = new Set([this.ctx.fs.processPath(root)])
+    await this.walk(root, '', root, request.query.toLowerCase(), request.mode, this.config.searchExcludedDirectories, state, visited, signal)
+    return { matches: state.matches, truncated: state.truncated }
+  }
+
+  /** One level of the bounded depth-first walk behind `search`. */
+  private async walk(
+    directory: FsTarget,
+    path: string,
+    root: FsTarget,
+    needle: string,
+    mode: WorkspaceFileSearchRequest['mode'],
+    excluded: readonly string[],
+    state: SearchState,
+    visited: Set<string>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const children = await this.ctx.fs.listDir(directory, signal)
+    for (const child of children) {
+      if (state.truncated) return
+      state.entries += 1
+      if (state.entries > this.config.maxSearchEntries) { state.truncated = true; return }
+      const childPath = path === '' ? child.name : `${path}/${child.name}`
+      if (child.type === 'directory') {
+        const identity = this.ctx.fs.processPath(child.target)
+        if (excluded.includes(child.name) || visited.has(identity) || !this.ctx.fs.contains(root, child.target)) continue
+        visited.add(identity)
+        await this.walk(child.target, childPath, root, needle, mode, excluded, state, visited, signal)
+        visited.delete(identity)
+        continue
+      }
+      if (child.type !== 'file') continue
+      if (mode === 'name') {
+        if (child.name.toLowerCase().includes(needle)) this.pushMatch(state, { path: childPath })
+        continue
+      }
+      await this.grepFile(child.target, childPath, needle, state, signal)
+    }
+  }
+
+  /** Match one file's lines, bounded by the per-file byte cap; non-text files contribute nothing. */
+  private async grepFile(target: FsTarget, path: string, needle: string, state: SearchState, signal: AbortSignal): Promise<void> {
+    const base = state.matches.length
+    let bytes = 0
+    let lineNumber = 0
+    let pending = ''
+    try {
+      for await (const chunk of await this.ctx.fs.streamText(target, signal)) {
+        if (chunk.includes(NUL)) { state.matches.splice(base); return }
+        bytes += Buffer.byteLength(chunk, 'utf8')
+        if (bytes > this.config.maxSearchFileBytes) break
+        pending += chunk
+        let newline = pending.indexOf('\n')
+        while (newline !== -1) {
+          lineNumber += 1
+          this.matchLine(pending.slice(0, newline), path, lineNumber, needle, state)
+          if (state.truncated) return
+          pending = pending.slice(newline + 1)
+          newline = pending.indexOf('\n')
+        }
+      }
+    } catch (error: unknown) {
+      if (isNotTextRefusal(error)) { state.matches.splice(base); return }
+      throw error
+    }
+    if (pending.length > 0) this.matchLine(pending, path, lineNumber + 1, needle, state)
+  }
+
+  /** Test one line against the needle and record the hit. */
+  private matchLine(line: string, path: string, lineNumber: number, needle: string, state: SearchState): void {
+    if (!line.toLowerCase().includes(needle)) return
+    const trimmed = line.trim()
+    this.pushMatch(state, {
+      path, line: lineNumber,
+      preview: trimmed.length <= SEARCH_PREVIEW_LENGTH ? trimmed : trimmed.slice(0, SEARCH_PREVIEW_LENGTH),
+    })
+  }
+
+  /** Record one hit; at the result cap the search stops and reports cut. */
+  private pushMatch(state: SearchState, match: WorkspaceFileSearchMatch): void {
+    state.matches.push(match)
+    if (state.matches.length >= this.config.maxSearchResults) state.truncated = true
   }
 
   private async relativePath(scope: WorkspaceFileScope, baseFile: string, path: string, signal: AbortSignal): Promise<string> {

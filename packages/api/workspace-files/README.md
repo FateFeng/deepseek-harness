@@ -34,10 +34,11 @@ Mount the package beside `dsh-fs`, `dsh-sandbox-policy`, the Session store, and 
 | `readBytes(path, { range?, baseFile? })` | `WorkspaceFileBytes` = stat + `{ offset, data, eof }` | Complete file or bounded byte range as `Uint8Array`; optionally resolve from another file's directory |
 | `list(path)` | `WorkspaceDirectoryListing { path, entries, truncated }` | Direct children of one directory |
 | `changes(path)` | stream of `WorkspaceFileWatchFrame` | Subscription readiness, then invalidations of one file or a directory's direct entries |
+| `search({ mode, query })` | `WorkspaceFileSearchResult { matches, truncated }` | Bounded file-name or content substring search across the workspace |
 
 ### Addressing and paths
 
-`read`, `readBytes`, and `stat` accept an absolute path or one relative to the selected Session's workspace root. The composed filesystem decides whether the path is readable; the service does not impose workspace containment on file reads. `readBytes` with `options.baseFile` resolves the relative target `path` from that file's directory, including when either file is outside the workspace. The base file itself accepts an absolute or workspace-relative path. Both files receive the same regular-file checks; an empty target, absolute target, URL, or NUL-containing target is rejected. File results report the absolute path in the filesystem's execution world. `list` remains workspace-scoped and reports the listed directory relative to that root. `changes` uses the same path resolution: file watches follow file-read authority, while directory watches remain workspace-scoped.
+`read`, `readBytes`, and `stat` accept an absolute path or one relative to the selected Session's workspace root. The composed filesystem decides whether the path is readable; the service does not impose workspace containment on file reads. `readBytes` with `options.baseFile` resolves the relative target `path` from that file's directory, including when either file is outside the workspace. The base file itself accepts an absolute or workspace-relative path. Both files receive the same regular-file checks; an empty target, absolute target, URL, or NUL-containing target is rejected. File results report the absolute path in the filesystem's execution world. `list` remains workspace-scoped and reports the listed directory relative to that root. `changes` uses the same path resolution: file watches follow file-read authority, while directory watches remain workspace-scoped. `search` takes no path: it always walks from the workspace root, and its hits come back in `list`'s workspace-relative vocabulary.
 
 ### Pages
 
@@ -57,6 +58,10 @@ Every operation first uses `lstat` to reject a missing path or the wrong file ki
 
 `changes` is a `stream` Remote accepting only a target path. The Host derives the target's type from `stat` and requires workspace containment whenever that type is a directory, including after a type change. A generation registers its observation queue, resolves the target, and starts `fs.watch` before yielding `{ kind: 'ready' }`. It then yields `{ kind: 'change', change }`, where `change` is current stat metadata `{ absolutePath, version }` or `{ absolutePath, absent: true }`. Local providers use Chokidar; directories watch only direct entries. Matching `fs/observed` emissions also invalidate the target. The generation queues changes during setup. Cancellation closes the watcher independently of consumer pulls, and generation or plugin teardown awaits closure. Missing files remain watchable for same-path recreation while their parent directory remains.
 
+### Search
+
+`search({ mode, query })` walks the workspace depth-first. `name` mode matches regular-file basenames by case-insensitive substring without reading content; `content` mode matches lines and returns a 1-based line number and a trimmed preview cut to the protocol length of 240 characters. The walk skips configured directory names (`.git` and `node_modules` by default), already-visited directory identities (symlink cycles), and symlinked directories leaving the workspace; file content keeps `read`'s authority. Non-UTF-8 or NUL-carrying files contribute no hits. An empty or NUL-carrying query is a `gateway/bad-request`. Reaching the hit, inspected-entry, or per-file byte cap ends the search early and marks the outcome `truncated`.
+
 ### Configuration
 
 | Field | Default | Meaning |
@@ -65,6 +70,10 @@ Every operation first uses `lstat` to reject a missing path or the wrong file ki
 | `maxFileBytes` | `33554432` (32 MiB) | Inclusive complete-file cap for `readBytes` without `range`; larger files fail with `too-large` |
 | `maxLines` | `5000` | Default and largest page size in lines; a larger `limit` is refused |
 | `maxEntries` | `2000` | Cap on returned directory entries; the rest is dropped and reported cut |
+| `maxSearchResults` | `200` | Cap on returned search hits; the rest is dropped and reported cut |
+| `maxSearchEntries` | `50000` | Cap on entries one search inspects; past it the search stops and reports cut |
+| `maxSearchFileBytes` | `1048576` (1 MiB) | Inclusive byte cap on one file's searched content; the rest of the file is not searched |
+| `searchExcludedDirectories` | `['.git', 'node_modules']` | Directory basenames a search never descends into |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-workspace-files) is the exhaustive source for every accepted field and its JSDoc.
 

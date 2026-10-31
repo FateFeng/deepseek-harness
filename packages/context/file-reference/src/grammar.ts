@@ -46,10 +46,62 @@ export function formatFileMention(
   candidate: FileReferenceCandidate,
   preserveQuote: boolean,
 ): string | undefined {
-  const path = candidate.kind === 'directory' ? `${candidate.path}/` : candidate.path
+  const selectedPath = candidate.referencePath ?? candidate.path
+  const path = candidate.kind === 'directory' ? `${selectedPath}/` : selectedPath
   if (/[\u0000-\u001f\u007f-\u009f"]/u.test(path)) return undefined
   const quoted = preserveQuote || /\s/u.test(path)
   if (!quoted) return `@${path}`
   if (candidate.kind === 'directory') return `@"${path}`
   return `@"${path}"`
+}
+
+/** Private DataTransfer MIME type for DSH workspace file references. */
+export const FILE_REFERENCE_DRAG_TYPE = 'application/x-dsh-file-reference'
+
+/** One workspace path carried by a Files-tree drag; Host still authorizes it. */
+export interface FileReferenceDragPayload {
+  readonly path: string
+  readonly kind: 'file' | 'directory'
+}
+
+interface SerializedFileReferenceDragPayload extends FileReferenceDragPayload {
+  readonly version: 1
+}
+
+function absoluteDragPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(path) || /^\\\\[^\\]+\\[^\\]+/u.test(path)
+}
+
+function dragMentionPath(payload: FileReferenceDragPayload): string {
+  if (payload.kind !== 'directory') return payload.path
+  return /[\\/]$/u.test(payload.path) ? payload.path : `${payload.path}/`
+}
+
+/** Plain-text fallback used by non-DSH drop targets. */
+export function fileReferenceDragText(payload: FileReferenceDragPayload): string | undefined {
+  // Keep directory tokens closed on drop; their trailing slash retains folder semantics.
+  return formatFileMention({ path: dragMentionPath(payload), kind: 'file' }, false)
+}
+
+/** Serialize only paths representable by the safe prompt grammar. */
+export function serializeFileReferenceDrag(payload: FileReferenceDragPayload): string | undefined {
+  if (!absoluteDragPath(payload.path) || fileReferenceDragText(payload) === undefined) return undefined
+  const value: SerializedFileReferenceDragPayload = { version: 1, path: payload.path, kind: payload.kind }
+  return JSON.stringify(value)
+}
+
+/** Parse and validate an untrusted DataTransfer payload. */
+export function parseFileReferenceDrag(value: string): FileReferenceDragPayload | undefined {
+  if (value === '' || value.length > 32_768) return undefined
+  try {
+    const candidate: unknown = JSON.parse(value)
+    if (typeof candidate !== 'object' || candidate === null) return undefined
+    const record = candidate as Record<string, unknown>
+    if (record.version !== 1 || typeof record.path !== 'string' || !absoluteDragPath(record.path)) return undefined
+    if (record.kind !== 'file' && record.kind !== 'directory') return undefined
+    const payload: FileReferenceDragPayload = { path: record.path, kind: record.kind }
+    return fileReferenceDragText(payload) === undefined ? undefined : payload
+  } catch {
+    return undefined
+  }
 }

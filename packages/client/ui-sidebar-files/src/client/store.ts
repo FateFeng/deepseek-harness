@@ -74,6 +74,7 @@ function bucket(state: FilesState, tabId: TabId): FilesTabState {
 type FilesActions = {
   autoRefresh: (draft: FilesState, tabId: TabId, enabled: boolean) => void
   start: (draft: FilesState, tabId: TabId, root: string) => void
+  changeRoot: (draft: FilesState, tabId: TabId, root: string) => void
   loading: (draft: FilesState, tabId: TabId, path: string) => void
   loaded: (draft: FilesState, tabId: TabId, path: string, level: DirLevel) => void
   failed: (draft: FilesState, tabId: TabId, path: string, failure: RemoteFailure) => void
@@ -103,6 +104,19 @@ export function createFilesStore(): EngineStoreHandle<FilesState, FilesActions> 
        */
       start: (d, tabId: TabId, root: string) => {
         d.byTab[tabId] = { root, levels: {}, expanded: [root], scrollTop: 0, autoRefresh: true }
+      },
+      /**
+       * Switch one tab to a different root and discard the previous tree view.
+       * @param d - draft state.
+       * @param tabId - the tab being drawn.
+       * @param root - absolute path of the new tree root.
+       */
+      changeRoot: (d, tabId: TabId, root: string) => {
+        const state = bucket(d, tabId)
+        state.root = root
+        state.levels = {}
+        state.expanded = [root]
+        state.scrollTop = 0
       },
       /**
        * Mark one directory as being listed.

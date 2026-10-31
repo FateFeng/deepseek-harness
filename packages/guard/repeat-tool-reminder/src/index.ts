@@ -19,7 +19,7 @@ declare module '@deepseek-ai/dsh-llm' {
 
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import type { PostToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { PostToolDecision, PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
 export const name = 'repeat-tool-reminder'
 
@@ -35,6 +35,10 @@ export const name = 'repeat-tool-reminder'
 export interface Config {
   /** Consecutive-repeat counts that trigger a reminder (default `[3, 5, 8]`). */
   thresholds?: number[]
+  /** Hard-deny the next exact repeat at this count; `0` disables blocking (default `0`). */
+  blockAt?: number
+  /** Hard-deny tracked calls after this many calls in one user turn; `0` disables the budget (default `0`). */
+  maxTrackedCallsPerTurn?: number
   /** Tool-name patterns to track; empty means every tool is tracked. */
   include?: string[]
   /** Tool-name patterns transparent to the chain (neither count nor reset). */
@@ -51,6 +55,8 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   thresholds: z.array(z.number()).default([3, 5, 8]),
+  blockAt: z.number().default(0),
+  maxTrackedCallsPerTurn: z.number().default(0),
   include: z.array(z.string()).default([]),
   exclude: z.array(z.string()).default([]),
   argumentsPreviewChars: z.number().default(500),
@@ -159,6 +165,7 @@ function prependContext(ours: UserMessage, theirs: UserMessage[] | undefined): U
 interface Chain {
   key: string
   count: number
+  calls: number
 }
 
 /**
@@ -170,6 +177,13 @@ export function apply(ctx: Context, config: Config): void {
   // schemastery's .default() guarantees the fields are set after validation.
   const thresholds = validateThresholds(config.thresholds as number[])
   const thresholdSet = new Set(thresholds)
+  const blockAt = config.blockAt as number
+  const maxTrackedCallsPerTurn = config.maxTrackedCallsPerTurn as number
+  for (const [name, value] of [['blockAt', blockAt], ['maxTrackedCallsPerTurn', maxTrackedCallsPerTurn]] as const) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`repeat-tool-reminder: invalid ${name} ${value} — must be an integer >= 0`)
+    }
+  }
   const includePatterns = (config.include as string[]).map(wildcardToRegExp)
   const excludePatterns = (config.exclude as string[]).map(wildcardToRegExp)
   const argumentsPreviewChars = config.argumentsPreviewChars as number
@@ -202,7 +216,8 @@ export function apply(ctx: Context, config: Config): void {
     const key = JSON.stringify([exec.name, canonical])
     const chain = chains.get(exec.agent)
     const count = chain !== undefined && chain.key === key ? chain.count + 1 : 1
-    chains.set(exec.agent, { key, count })
+    const calls = (chain?.calls ?? 0) + 1
+    chains.set(exec.agent, { key, count, calls })
     if (!thresholdSet.has(count)) return undefined
     const text = count === thresholds[0]
       ? GENTLE_REMINDER
@@ -213,8 +228,24 @@ export function apply(ctx: Context, config: Config): void {
     })
   }
 
-  // Observe-and-enrich, never veto: count first (state advances regardless of
-  // the downstream outcome), DELEGATE so a later listener can still block or
+  // Optional hard boundary: deny the next exact repeat or any tracked call after
+  // the per-turn budget. Defaults are disabled so existing consumers retain the
+  // advisory contract; deployments can opt into a fail-safe stopgap.
+  ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
+    if (!exec.agent || !tracked(exec.name)) return next()
+    const state = chains.get(exec.agent)
+    const key = JSON.stringify([exec.name, canonicalize(exec.arguments)])
+    if (state !== undefined && blockAt > 0 && state.key === key && state.count + 1 >= blockAt) {
+      return { kind: 'deny', reason: `repeat-tool-reminder: blocked exact repeat at ${blockAt} calls; inspect the latest result and finish or change scope` }
+    }
+    if (state !== undefined && maxTrackedCallsPerTurn > 0 && state.calls >= maxTrackedCallsPerTurn) {
+      return { kind: 'deny', reason: `repeat-tool-reminder: blocked after ${maxTrackedCallsPerTurn} tracked calls in one user turn; summarize current evidence instead of expanding scope` }
+    }
+    return next()
+  })
+
+  // Observe-and-enrich: count first (state advances regardless of the
+  // downstream outcome), DELEGATE so a later listener can still block or
   // replace, then fold the reminder onto whatever came back — additionalContexts
   // rides both decision variants, so a blocked call still gets the nudge.
   ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {

@@ -9,6 +9,12 @@ export interface TerminalInjected {
   /** @param key - sidebar occurrence key. @returns its terminal commands. */
   readonly view: (key: string) => TerminalView
   readonly keyedHooks: { readonly terminal: (key: string) => HostObservable<TerminalViewState> }
+  /**
+   * Open a file referenced from terminal output in the right Sidebar.
+   * @param path - the path as printed, workspace-relative or absolute.
+   * @param options - the 1-based referenced line and the working directory a relative path resolves against.
+   */
+  readonly openFile: (path: string, options?: { line?: number | undefined; cwd?: string | undefined }) => void
 }
 
 

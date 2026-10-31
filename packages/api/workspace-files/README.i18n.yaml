@@ -15,11 +15,11 @@
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
 /deepseek-ai-dsh-api-workspace-files/use-this-package:
-  en: 874054ed5e950973
-  zh: e8b55d62939c4c2f
+  en: f3cda93802b449df
+  zh: 58564be42ac3e3ea
 /deepseek-ai-dsh-api-workspace-files/use-this-package/addressing-and-paths:
-  en: b9565cfa7a1da451
-  zh: fc4078a58322fc7f
+  en: 27c800b375f3399e
+  zh: 78e799ae83a3ae5f
 /deepseek-ai-dsh-api-workspace-files/use-this-package/pages:
   en: 9cd68b8be3390c80
   zh: 26049ce447f00452
@@ -32,9 +32,12 @@
 /deepseek-ai-dsh-api-workspace-files/use-this-package/the-change-feed:
   en: 8bd2d820a512d461
   zh: 0614ddd842ae7526
+/deepseek-ai-dsh-api-workspace-files/use-this-package/search:
+  en: 9bf17c6529a1d5bf
+  zh: 80cbbc3a6b7842d9
 /deepseek-ai-dsh-api-workspace-files/use-this-package/configuration:
-  en: e606e8b22ac6e0d0
-  zh: 13a7214448036d7b
+  en: 5ca0d96421969b41
+  zh: 48fd846edeec29a3
 /deepseek-ai-dsh-api-workspace-files/use-this-package/failures:
   en: c53d597c8f255e69
   zh: 1e00318f9a34f3bb
