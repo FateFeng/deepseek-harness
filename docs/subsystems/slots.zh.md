@@ -14,6 +14,8 @@ root 作用域的 list `sidebar.panellist.actions`、`conversation.session.heade
 
 [ui-workspace](../../packages/client/ui-workspace/README.zh.md#understand-the-implementation) 记录 Session 行的扩展位置、显示条件和键盘行为。
 
+`sidebar.workspaces.workspace.edit` 是工作区编辑对话框内部的 root 作用域 `single` child；owner 提供 `workspaceId`、主目录 `path` 和 `title`。`sidebar.right.tab.files.actions` 是 Files 标签页刷新控件之后的 root 作用域 `list`；每项 contribution 会收到当前显示的 `absolutePath`、规范的 Session `workspacePath`，以及异步 owner callback `onRootChange(path)`。callback 会在旧目录树关闭、新根目录打开后 settle。集成方必须在调用前先为替代目录持久化 Host 授权；这不会改变 Session cwd 或 Workspace 身份。root scope 让编辑框和所有已打开 Files 标签页可以共享工作区级 source 状态。
+
 ## 声明与生命周期
 
 `SlotMap` 是编译期注册表。包通过声明合并写入 key、cardinality（基数）、scope、owner props、keyed props 与可选的 slot 级 inject face。运行时声明则是拥有该渲染位置的组件在 `children` 中给出的对应条目。

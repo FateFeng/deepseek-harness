@@ -14,6 +14,8 @@ The root-scoped lists `sidebar.panellist.actions`, `conversation.session.header.
 
 [ui-workspace](../../packages/client/ui-workspace/README.md#understand-the-implementation) documents Session-row extension positions, visibility, and keyboard behavior.
 
+`sidebar.workspaces.workspace.edit` is a root-scoped `single` child rendered inside the Workspace edit dialog; its owner supplies `workspaceId`, the primary `path`, and `title`. `sidebar.right.tab.files.actions` is a root-scoped `list` rendered after the Files tab reload control; each contribution receives the displayed `absolutePath`, canonical Session `workspacePath`, and asynchronous `onRootChange(path)` owner callback. The callback settles after the prior tree closes and the replacement root opens. Integrations must persist Host authorization for an alternate root before calling it; this changes neither Session cwd nor the Workspace identity. Root scope lets Workspace-wide source state be shared by the edit dialog and every open Files tab.
+
 ## Declaration and lifecycle
 
 `SlotMap` is the compile-time registry. A package declaration-merges the key, cardinality, scope, owner props, keyed props, and optional slot-level inject face. The runtime declaration is the matching `children` entry on the component that owns the render location.
