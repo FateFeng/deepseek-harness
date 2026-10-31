@@ -276,7 +276,9 @@ function WorkspaceProjectRow({ workspaceId, ...props }: ProjectRowItemProps & { 
   const { useWorkspaceAccess } = props
   const access: ProjectRowAccess = {
     create: useWorkspaceAccess(workspaceId, 'session/create'),
-    edit: true,
+    // The edit dialog saves the title through the same rename request, so it is offered
+    // exactly where renaming is granted.
+    edit: useWorkspaceAccess(workspaceId, 'workspace/rename'),
     rename: useWorkspaceAccess(workspaceId, 'workspace/rename'),
     delete: useWorkspaceAccess(workspaceId, 'workspace/delete'),
     reorder: useWorkspaceAccess(workspaceId, 'workspace/insertBefore'),
