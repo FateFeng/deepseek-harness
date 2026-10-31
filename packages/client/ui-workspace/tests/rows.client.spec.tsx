@@ -681,7 +681,7 @@ describe('workspace browser rows', () => {
     const useWorkspaceAccess = vi.fn((_workspaceId: WorkspaceId, endpoint: string) => allowed.has(endpoint))
     const drag = { start: vi.fn(), end: vi.fn() }
     const props = {
-      group, onToggle: vi.fn(), onCreate: vi.fn(), actions: { rename: vi.fn(), delete: vi.fn() }, drag, t,
+      group, onToggle: vi.fn(), onCreate: vi.fn(), actions: { edit: vi.fn(), rename: vi.fn(), delete: vi.fn() }, drag, t,
     }
     const view = render(<ProjectRowItem {...props} useWorkspaceAccess={useWorkspaceAccess} />)
     expect(useWorkspaceAccess).toHaveBeenCalledWith(wid('project'), 'session/create')

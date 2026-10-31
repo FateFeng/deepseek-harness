@@ -83,7 +83,7 @@ export interface UiWorkspace {
    * @param options - choices for the created or reused Session.
    * @returns a Session already addressable through the Session Controller.
    */
-  connectWorkspace(workspaceId: WorkspaceId, options?: Pick<StartSessionOptions, 'agentPreset'>): Promise<SessionId>
+  connectWorkspace(workspaceId: WorkspaceId, options?: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>): Promise<SessionId>
   /**
    * Open the Workspace blank `connectWorkspace` resolves, so New Session returns to that blank's
    * unsent draft. A creation the Host refuses is shown through the Workspace notice and leaves the
@@ -211,7 +211,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }, 'ui-workspace: Workspace navigation policy')
   }
 
-  connectWorkspace(workspaceId: WorkspaceId, options: Pick<StartSessionOptions, 'agentPreset'> = {}): Promise<SessionId> {
+  connectWorkspace(workspaceId: WorkspaceId, options: Pick<StartSessionOptions, 'agentPreset' | 'fresh'> = {}): Promise<SessionId> {
     return this.connectBlank(workspaceId, options)
   }
 
@@ -220,7 +220,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
    */
   private async connectBlank(
     workspaceId: WorkspaceId,
-    reuse: Pick<StartSessionOptions, 'agentPreset'>,
+    reuse: Pick<StartSessionOptions, 'agentPreset' | 'fresh'>,
   ): Promise<SessionId> {
     const workspace = this.workspaces.list.getSnapshot().items
       .find(item => item.workspaceId === workspaceId)

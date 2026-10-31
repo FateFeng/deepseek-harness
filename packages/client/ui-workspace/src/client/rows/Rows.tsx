@@ -371,7 +371,7 @@ function ProjectRow({
             </button>
           </Tooltip>
         )}
-        {onCreateFresh !== undefined && (
+        {access.create && onCreateFresh !== undefined && (
           <Tooltip label={t('actions.freshSession')} side="bottom" align="end" delayMs={500} portal>
             <button
               type="button"

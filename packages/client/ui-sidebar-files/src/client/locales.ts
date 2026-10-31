@@ -98,6 +98,14 @@ export const ja = {
   'error.outsideWorkspace': 'そのディレクトリはワークスペース外のため、サイドバーでは読み取りません。',
   'error.notDirectory': 'それはディレクトリではありません。',
   'error.unavailable': '読み取りに失敗しました: {message}',
+  'search.placeholder': 'ファイルを検索',
+  'search.mode': '検索範囲',
+  'search.mode.name': '名前',
+  'search.mode.content': '内容',
+  'search.searching': '検索中…',
+  'search.empty': '一致する結果はありません。',
+  'search.truncated': '結果が多すぎるため、一部のみ表示しています。',
+  'search.failed': '検索に失敗しました: {message}',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -119,6 +127,14 @@ export const es = {
   'error.outsideWorkspace': 'Ese directorio está fuera del espacio de trabajo, por lo que la barra lateral no lo leerá.',
   'error.notDirectory': 'Eso no es un directorio.',
   'error.unavailable': 'Error de lectura: {message}',
+  'search.placeholder': 'Buscar archivos',
+  'search.mode': 'Ámbito de búsqueda',
+  'search.mode.name': 'Nombre',
+  'search.mode.content': 'Contenido',
+  'search.searching': 'Buscando…',
+  'search.empty': 'No hay resultados coincidentes.',
+  'search.truncated': 'Demasiados resultados, solo se muestran algunos de ellos.',
+  'search.failed': 'Error de búsqueda: {message}',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -140,6 +156,14 @@ export const fr = {
   'error.outsideWorkspace': 'Ce répertoire se trouve en dehors de l’espace de travail, donc la barre latérale ne le lira pas.',
   'error.notDirectory': "Ce n'est pas un répertoire.",
   'error.unavailable': 'Échec de lecture : {message}',
+  'search.placeholder': 'Rechercher des fichiers',
+  'search.mode': 'Portée de la recherche',
+  'search.mode.name': 'Nom',
+  'search.mode.content': 'Contenu',
+  'search.searching': 'Recherche en cours…',
+  'search.empty': 'Aucun résultat correspondant.',
+  'search.truncated': 'Trop de résultats, n’en affichant que certains.',
+  'search.failed': 'Échec de la recherche : {message}',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -161,6 +185,14 @@ export const de = {
   'error.outsideWorkspace': 'Dieses Verzeichnis liegt außerhalb des Arbeitsbereichs und wird daher von der Seitenleiste nicht gelesen.',
   'error.notDirectory': 'Das ist kein Verzeichnis.',
   'error.unavailable': 'Lesen fehlgeschlagen: {message}',
+  'search.placeholder': 'Dateien durchsuchen',
+  'search.mode': 'Suchbereich',
+  'search.mode.name': 'Name',
+  'search.mode.content': 'Inhalt',
+  'search.searching': 'Suche läuft…',
+  'search.empty': 'Keine übereinstimmenden Ergebnisse.',
+  'search.truncated': 'Zu viele Ergebnisse, es werden nur einige davon angezeigt.',
+  'search.failed': 'Suche fehlgeschlagen: {message}',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -182,6 +214,14 @@ export const ru = {
   'error.outsideWorkspace': 'Этот каталог находится за пределами рабочей области, поэтому боковая панель его не читает.',
   'error.notDirectory': 'Это не каталог.',
   'error.unavailable': 'Не удалось прочитать: {message}.',
+  'search.placeholder': 'Поиск файлов',
+  'search.mode': 'Область поиска',
+  'search.mode.name': 'Имя',
+  'search.mode.content': 'Содержимое',
+  'search.searching': 'Выполняется поиск…',
+  'search.empty': 'Совпадений не найдено.',
+  'search.truncated': 'Слишком много результатов, показаны только некоторые из них.',
+  'search.failed': 'Ошибка поиска: {message}',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -203,4 +243,12 @@ export const pt = {
   'error.outsideWorkspace': 'Esse diretório está fora da área de trabalho, portanto a barra lateral não o lerá.',
   'error.notDirectory': 'Isso não é um diretório.',
   'error.unavailable': 'Falha na leitura: {message}',
+  'search.placeholder': 'Pesquisar arquivos',
+  'search.mode': 'Escopo da pesquisa',
+  'search.mode.name': 'Nome',
+  'search.mode.content': 'Conteúdo',
+  'search.searching': 'Pesquisando…',
+  'search.empty': 'Nenhum resultado correspondente.',
+  'search.truncated': 'Muitos resultados, mostrando apenas alguns deles.',
+  'search.failed': 'Falha na pesquisa: {message}',
 } satisfies Record<keyof typeof en, string>
