@@ -39,6 +39,8 @@ kind: "package-reference"
 - name: '@deepseek-ai/dsh-repeat-tool-reminder'
   config:
     thresholds: [3, 5, 8]        # remind at 3, 5, and 8 consecutive repeats
+    blockAt: 8                    # deny the next exact repeat; 0 disables
+    maxTrackedCallsPerTurn: 24    # deny after 24 tracked calls; 0 disables
     include: []                  # track every tool; list patterns to track only some
     exclude: [todo_write]        # never track these tools
     argumentsPreviewChars: 500   # cap on arguments shown in the detailed reminder
@@ -47,6 +49,8 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `thresholds` | `[3, 5, 8]` | 触发提醒的重复次数 |
+| `blockAt` | `0` | 达到该次数后硬拒绝下一次精确重复；`0` 表示仅建议 |
+| `maxTrackedCallsPerTurn` | `0` | 每个用户轮次超过该跟踪调用预算后硬拒绝；`0` 表示禁用 |
 | `include` | `[]` | 只跟踪这些工具；空表示所有工具 |
 | `exclude` | `[]` | 绝不跟踪这些工具；对它们的调用既不计数也不重置 |
 | `argumentsPreviewChars` | `500` | 详细提醒中显示多少字符的重复参数 |
@@ -167,7 +171,8 @@ The repeated calls are not making progress. Do not call this tool with these exa
 
 - **仅精确匹配检测**——规范化是深度键排序，因此近似变体（稍作修改的路径、值内多余的空白）会绕过链；在没有需求证据前，不采用模糊匹配。
 - **压缩（compaction）不会重置链**——跨越压缩检查点的链会继续计数。
-- **仅提供建议**——尚未实现高阈值时升级为阻止形式，但 `PostToolDecision` 已支持阻止。
+- **不推断语义范围漂移**——guard 不理解两次不同的搜索是否有相同的人类目标；在出现按任务范围的进度契约之前，用 `maxTrackedCallsPerTurn` 作为粗略的兜底。
+- **硬边界属于部署策略**——`blockAt` 与 `maxTrackedCallsPerTurn` 会拒绝调用，可能中断合法的长任务；请按 profile 调参，并在兼容模式下保持包默认值为禁用。
 - **subagent 之间不共享链**——链始终按 agent 隔离；父 agent 与其 subagent 重复相同调用也绝不合并。
 - **合理的幂等轮询超过阈值后仍会收到提醒**——可通过 `thresholds`／`exclude` 配置释放压力。
 - **超过最高阈值后链不再提醒**——提醒只在精确达到所配置的次数时触发，超过后不会继续发送。
